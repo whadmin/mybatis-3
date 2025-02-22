@@ -40,45 +40,7 @@ import org.apache.ibatis.session.RowBounds;
  *   <li>支持多种参数传递方式（注解、顺序、Map等）</li>
  * </ul>
  *
- * <p>参数处理规则：</p>
- * <ol>
- *   <li>优先使用@Param注解指定的名称</li>
- *   <li>通过参数名发现机制获取实际参数名</li>
- *   <li>使用默认命名（param1, param2, ...）</li>
- * </ol>
- *
- *
- * <p>最佳实践：</p>
- * <ul>
- *   <li>单个参数：直接使用参数，无需注解
- *     <pre>
- *     User getById(Integer id);
- *     </pre>
- *   </li>
- *   <li>多个参数：使用@Param注解明确参数含义
- *     <pre>
- *     List<User> findUsers(@Param("name") String name, @Param("age") Integer age);
- *     </pre>
- *   </li>
- *   <li>对象参数：直接传递对象，使用属性名引用
- *     <pre>
- *     void updateUser(User user);
- *     </pre>
- *   </li>
- *   <li>集合参数：注意Map封装规则
- *     <pre>
- *     List<User> findByIds(List<Integer> ids); // 访问方式：collection/list
- *     List<User> findByArray(Integer[] ids);   // 访问方式：array
- *     </pre>
- *   </li>
- * </ul>
- *
- * <p>注意事项：</p>
- * <ul>
- *   <li>特殊参数类型（RowBounds、ResultHandler）会被框架特殊处理，不会作为SQL参数</li>
- *   <li>参数名冲突时，后定义的会覆盖先定义的</li>
- *   <li>集合类型参数会被自动包装为Map，需要注意SQL中的访问方式</li>
- * </ul>
+
  */
 public class ParamNameResolver {
 
@@ -173,92 +135,126 @@ public class ParamNameResolver {
    * <p>参数转换规则（按参数个数）：</p>
    * <ul>
    *   <li>无参数：返回null</li>
-   *   <li>单个参数：通常直接返回参数值</li>
+   *   <li>单个参数：根据参数类型和注解决定是否包装</li>
    *   <li>多个参数：返回ParamMap封装的参数</li>
    * </ul>
    *
    * <p>详细的参数处理场景：</p>
-   * <table>
-   *   <tr>
-   *     <th>场景</th>
-   *     <th>Mapper方法示例</th>
-   *     <th>参数值示例</th>
-   *     <th>转换结果</th>
-   *     <th>XML中的访问方式</th>
-   *   </tr>
-   *   <tr>
-   *     <td>1. 单个基本类型参数</td>
-   *     <td>User getById(Integer id)</td>
-   *     <td>[1]</td>
-   *     <td>直接返回: 1</td>
-   *     <td>#{id} 或 #{param1}</td>
-   *   </tr>
-   *   <tr>
-   *     <td>2. 单个Collection/List参数</td>
-   *     <td>List<User> findByIds(List<Integer> ids)</td>
-   *     <td>[[1,2,3]]</td>
-   *     <td>Map: {"collection":[1,2,3], "list":[1,2,3]}</td>
-   *     <td>#{collection[0]} 或 #{list[0]}</td>
-   *   </tr>
-   *   <tr>
-   *     <td>3. 单个Set参数</td>
-   *     <td>List<User> findByIds(Set<Integer> ids)</td>
-   *     <td>[{1,2,3}]</td>
-   *     <td>Map: {"collection":{1,2,3}}</td>
-   *     <td>#{collection[0]}</td>
-   *   </tr>
-   *   <tr>
-   *     <td>4. 单个数组参数</td>
-   *     <td>List<User> findByIds(Integer[] ids)</td>
-   *     <td>[[1,2,3]]</td>
-   *     <td>Map: {"array":[1,2,3]}</td>
-   *     <td>#{array[0]}</td>
-   *   </tr>
-   *   <tr>
-   *     <td>5. 单个POJO参数</td>
-   *     <td>void updateUser(User user)</td>
-   *     <td>[User{id=1,name="Tom"}]</td>
-   *     <td>直接返回: User对象</td>
-   *     <td>#{id}, #{name}</td>
-   *   </tr>
-   *   <tr>
-   *     <td>6. 单个Map参数</td>
-   *     <td>User getByMap(Map<String,Object> param)</td>
-   *     <td>[{"id":1}]</td>
-   *     <td>直接返回: Map对象</td>
-   *     <td>#{id}</td>
-   *   </tr>
-   *   <tr>
-   *     <td>7. 多个参数</td>
-   *     <td>List<User> findUsers(String name, Integer age)</td>
-   *     <td>["Tom", 20]</td>
-   *     <td>Map: {"param1":"Tom", "param2":20}</td>
-   *     <td>#{param1}, #{param2}</td>
-   *   </tr>
-   * </table>
+   *
+   * <p>1. 单个基本类型参数：</p>
+   * <pre>
+   * User getById(Integer id)
+   * 输入参数：[1]
+   * 返回结果：1
+   * XML访问：#{id} 或 #{param1}
+   * </pre>
+   *
+   * <p>2. 单个对象参数（带@Param注解）：</p>
+   * <pre>
+   * void updateUser(@Param("userData") User user)
+   * 输入参数：[User{id=1,name="Tom"}]
+   * 返回结果：{
+   *   "userData": User对象,
+   *   "param1": User对象
+   * }
+   * XML访问：#{userData.id} 或 #{param1.id}
+   * </pre>
+   *
+   * <p>3. 多个基本类型参数：</p>
+   * <pre>
+   * List<User> findUsers(String name, Integer age)
+   * 输入参数：["Tom", 20]
+   * 返回结果（useActualParamName=true）：{
+   *   "name": "Tom",
+   *   "age": 20,
+   *   "param1": "Tom",
+   *   "param2": 20
+   * }
+   * 返回结果（useActualParamName=false）：{
+   *   "0": "Tom",
+   *   "1": 20,
+   *   "param1": "Tom",
+   *   "param2": 20
+   * }
+   * XML访问：#{name}, #{age} 或 #{param1}, #{param2}
+   * </pre>
+   *
+   * <p>4. 多个混合类型参数：</p>
+   * <pre>
+   * List<User> findUsersComplex(String name, User user)
+   * 输入参数：["Tom", User{id=1}]
+   * 返回结果（useActualParamName=true）：{
+   *   "name": "Tom",
+   *   "user": User对象,
+   *   "param1": "Tom",
+   *   "param2": User对象
+   * }
+   * XML访问：#{name}, #{user.id} 或 #{param1}, #{param2.id}
+   * </pre>
+   *
+   * <p>5. 带@Param注解的参数：</p>
+   * <pre>
+   * List<User> findUsers(@Param("userName") String name, @Param("userAge") Integer age)
+   * 输入参数：["Tom", 20]
+   * 返回结果：{
+   *   "userName": "Tom",
+   *   "userAge": 20,
+   *   "param1": "Tom",
+   *   "param2": 20
+   * }
+   * XML访问：#{userName}, #{userAge}
+   * </pre>
+   *
+   * <p>6. 集合类型参数：</p>
+   * <pre>
+   * List<User> findByIds(List<Integer> ids)
+   * 输入参数：[[1,2,3]]
+   * 返回结果：{
+   *   "ids": [1,2,3],
+   *   "collection": [1,2,3],
+   *   "list": [1,2,3]
+   * }
+   * XML访问：
+   * #{list[0]} 或
+   * <foreach collection="list" item="id">#{id}</foreach>
+   * </pre>
+   *
+   * <p>7. 数组类型参数：</p>
+   * <pre>
+   * List<User> findByNames(String[] names)
+   * 输入参数：[["Tom","Jerry"]]
+   * 返回结果：{
+   *   "names": ["Tom","Jerry"],
+   *   "array": ["Tom","Jerry"]
+   * }
+   * XML访问：
+   * #{array[0]} 或
+   * <foreach collection="array" item="name">#{name}</foreach>
+   * </pre>
+   *
+   * <p>8. 特殊类型参数：</p>
+   * <pre>
+   * List<User> findUsers(String name, RowBounds rb, ResultHandler h)
+   * 输入参数：["Tom", rb, h]
+   * 返回结果："Tom"
+   * XML访问：#{param1}
+   * </pre>
+   *
+   * <p>参数名解析优先级：</p>
+   * <ol>
+   *   <li>@Param注解指定的名称</li>
+   *   <li>useActualParamName=true时的参数实际名称</li>
+   *   <li>参数索引作为名称（"0", "1", ...）</li>
+   *   <li>默认参数名（"param1", "param2", ...）</li>
+   * </ol>
    *
    * <p>特殊说明：</p>
    * <ul>
-   *   <li>Collection类型参数会被包装为Map，提供"collection"键访问</li>
-   *   <li>List类型参数额外提供"list"键访问</li>
-   *   <li>数组类型参数使用"array"键访问</li>
-   *   <li>多参数时可以使用@Param注解指定参数名</li>
-   *   <li>RowBounds和ResultHandler类型的参数会被忽略</li>
+   *   <li>单个参数且无@Param注解时，通常直接返回参数值</li>
+   *   <li>集合类型参数会被包装为Map，提供多种访问方式</li>
+   *   <li>RowBounds和ResultHandler类型参数会被忽略</li>
+   *   <li>useActualParamName配置影响参数名生成，但不影响@Param注解的结果</li>
    * </ul>
-   *
-   * <p>XML中的访问方式：</p>
-   * <pre>
-   * <!-- 1. 单个参数 -->
-   * #{id} 或 #{param1}
-   *
-   * <!-- 2. 集合参数 -->
-   * <foreach collection="list" item="id">
-   *   #{id}
-   * </foreach>
-   *
-   * <!-- 3. 多参数 -->
-   * #{param1}, #{param2} 或 使用@Param注解指定的名称
-   * </pre>
    *
    * @param args Mapper方法的参数数组
    * @return 转换后的参数对象，可能是原始参数值或ParamMap
