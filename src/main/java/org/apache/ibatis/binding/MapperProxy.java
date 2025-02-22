@@ -31,6 +31,26 @@ import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.util.MapUtil;
 
 /**
+ * Mapper代理类，用于创建Mapper接口的动态代理实现。
+ * 实现了InvocationHandler接口以提供代理逻辑，同时实现Serializable接口支持序列化。
+ *
+ * <p>主要功能：</p>
+ * <ul>
+ *   <li>作为Mapper接口的动态代理实现，处理所有Mapper接口方法的调用</li>
+ *   <li>支持接口默认方法的调用（Java 8特性）</li>
+ *   <li>通过缓存机制优化方法调用性能</li>
+ *   <li>适配不同Java版本（8和9+）的反射API调用方式</li>
+ * </ul>
+ *
+ * <p>处理逻辑：</p>
+ * <ol>
+ *   <li>当调用Mapper接口的方法时，会先进入invoke方法</li>
+ *   <li>判断是否是Object类的方法，如果是则直接调用</li>
+ *   <li>否则获取缓存的方法调用器（MapperMethodInvoker）</li>
+ *   <li>根据方法是否为默认方法，选择不同的调用器实现</li>
+ *   <li>最终执行对应的SQL操作或默认方法实现</li>
+ * </ol>
+ *
  * @author Clinton Begin
  * @author Eduardo Macarron
  */
