@@ -21,7 +21,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -31,42 +30,120 @@ import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 
+/**
+ * 参数名称解析器，用于Mapper方法参数与转换成执行SqlSession参数的映射关系
+ *
+ * <p>主要功能：</p>
+ * <ul>
+ *   <li>解析方法参数名称（支持@Param注解和参数名发现机制）</li>
+ *   <li>处理参数到SQL参数的转换</li>
+ *   <li>支持多种参数传递方式（注解、顺序、Map等）</li>
+ * </ul>
+ *
+ * <p>参数处理规则：</p>
+ * <ol>
+ *   <li>优先使用@Param注解指定的名称</li>
+ *   <li>通过参数名发现机制获取实际参数名</li>
+ *   <li>使用默认命名（param1, param2, ...）</li>
+ * </ol>
+ *
+ *
+ * <p>最佳实践：</p>
+ * <ul>
+ *   <li>单个参数：直接使用参数，无需注解
+ *     <pre>
+ *     User getById(Integer id);
+ *     </pre>
+ *   </li>
+ *   <li>多个参数：使用@Param注解明确参数含义
+ *     <pre>
+ *     List<User> findUsers(@Param("name") String name, @Param("age") Integer age);
+ *     </pre>
+ *   </li>
+ *   <li>对象参数：直接传递对象，使用属性名引用
+ *     <pre>
+ *     void updateUser(User user);
+ *     </pre>
+ *   </li>
+ *   <li>集合参数：注意Map封装规则
+ *     <pre>
+ *     List<User> findByIds(List<Integer> ids); // 访问方式：collection/list
+ *     List<User> findByArray(Integer[] ids);   // 访问方式：array
+ *     </pre>
+ *   </li>
+ * </ul>
+ *
+ * <p>注意事项：</p>
+ * <ul>
+ *   <li>特殊参数类型（RowBounds、ResultHandler）会被框架特殊处理，不会作为SQL参数</li>
+ *   <li>参数名冲突时，后定义的会覆盖先定义的</li>
+ *   <li>集合类型参数会被自动包装为Map，需要注意SQL中的访问方式</li>
+ * </ul>
+ */
 public class ParamNameResolver {
 
+  /**
+   * 默认参数名前缀
+   * 当参数没有@Param注解时，使用 "param1", "param2" 等作为参数名
+   */
   public static final String GENERIC_NAME_PREFIX = "param";
 
+  /**
+   * 是否使用实际参数名
+   *
+   * <p>该属性控制是否使用Java 8引入的参数名反射机制获取方法的实际参数名：</p>
+   */
   private final boolean useActualParamName;
 
   /**
-   * <p>
-   * The key is the index and the value is the name of the parameter.<br />
-   * The name is obtained from {@link Param} if specified. When {@link Param} is not specified, the parameter index is
-   * used. Note that this index could be different from the actual index when the method has special parameters (i.e.
-   * {@link RowBounds} or {@link ResultHandler}).
-   * </p>
-   * <ul>
-   * <li>aMethod(@Param("M") int a, @Param("N") int b) -&gt; {{0, "M"}, {1, "N"}}</li>
-   * <li>aMethod(int a, int b) -&gt; {{0, "0"}, {1, "1"}}</li>
-   * <li>aMethod(int a, RowBounds rb, int b) -&gt; {{0, "0"}, {2, "1"}}</li>
-   * </ul>
+   * 参数名映射
+   * key: 参数索引位置
+   * value: 参数名
    */
   private final SortedMap<Integer, String> names;
 
+  /**
+   * 是否已经使用了@Param注解
+   */
   private boolean hasParamAnnotation;
 
+  /**
+   * 构造函数，解析方法参数信息并建立参数索引到参数名的映射关系
+   *
+   * <p>参数名解析规则（按优先级）：</p>
+   * <ol>
+   *   <li>@Param注解指定的名称</li>
+   *   <li>方法的实际参数名（需要开启-parameters编译选项）</li>
+   *   <li>默认名称（param1, param2, ...）</li>
+   * </ol>
+   *
+   * <p>特殊处理：</p>
+   * <ul>
+   *   <li>跳过RowBounds和ResultHandler类型的参数</li>
+   *   <li>使用TreeMap保证参数顺序</li>
+   *   <li>最终生成不可修改的参数名映射</li>
+   * </ul>
+   *
+   *
+   * @param config MyBatis配置对象，用于判断是否启用实际参数名
+   * @param method 要解析的方法对象
+   */
   public ParamNameResolver(Configuration config, Method method) {
     this.useActualParamName = config.isUseActualParamName();
     final Class<?>[] paramTypes = method.getParameterTypes();
     final Annotation[][] paramAnnotations = method.getParameterAnnotations();
     final SortedMap<Integer, String> map = new TreeMap<>();
     int paramCount = paramAnnotations.length;
-    // get names from @Param annotations
+
+    // 遍历所有参数
     for (int paramIndex = 0; paramIndex < paramCount; paramIndex++) {
+      // 跳过特殊参数类型
       if (isSpecialParameter(paramTypes[paramIndex])) {
-        // skip special parameters
         continue;
       }
       String name = null;
+
+      // 1. 首先查找@Param注解
       for (Annotation annotation : paramAnnotations[paramIndex]) {
         if (annotation instanceof Param) {
           hasParamAnnotation = true;
@@ -74,15 +151,15 @@ public class ParamNameResolver {
           break;
         }
       }
+
       if (name == null) {
-        // @Param was not specified.
+        // 2. 尝试获取实际参数名
         if (useActualParamName) {
           name = getActualParamName(method, paramIndex);
         }
         if (name == null) {
-          // use the parameter index as the name ("0", "1", ...)
-          // gcode issue #71
-          name = String.valueOf(map.size());
+          // 3. 使用默认命名：参数位置索引（从1开始）
+          name = String.valueOf(map.size() + 1);
         }
       }
       map.put(paramIndex, name);
@@ -90,50 +167,119 @@ public class ParamNameResolver {
     names = Collections.unmodifiableSortedMap(map);
   }
 
-  private String getActualParamName(Method method, int paramIndex) {
-    return ParamNameUtil.getParamNames(method).get(paramIndex);
-  }
-
-  private static boolean isSpecialParameter(Class<?> clazz) {
-    return RowBounds.class.isAssignableFrom(clazz) || ResultHandler.class.isAssignableFrom(clazz);
-  }
-
   /**
-   * Returns parameter names referenced by SQL providers.
+   * 将Mapper接口方法的参数转换为SqlSession执行时需要的参数
    *
-   * @return the names
-   */
-  public String[] getNames() {
-    return names.values().toArray(new String[0]);
-  }
-
-  /**
-   * <p>
-   * A single non-special parameter is returned without a name. Multiple parameters are named using the naming rule. In
-   * addition to the default names, this method also adds the generic names (param1, param2, ...).
-   * </p>
+   * <p>参数转换规则（按参数个数）：</p>
+   * <ul>
+   *   <li>无参数：返回null</li>
+   *   <li>单个参数：通常直接返回参数值</li>
+   *   <li>多个参数：返回ParamMap封装的参数</li>
+   * </ul>
    *
-   * @param args
-   *          the args
+   * <p>详细的参数处理场景：</p>
+   * <table>
+   *   <tr>
+   *     <th>场景</th>
+   *     <th>Mapper方法示例</th>
+   *     <th>参数值示例</th>
+   *     <th>转换结果</th>
+   *     <th>XML中的访问方式</th>
+   *   </tr>
+   *   <tr>
+   *     <td>1. 单个基本类型参数</td>
+   *     <td>User getById(Integer id)</td>
+   *     <td>[1]</td>
+   *     <td>直接返回: 1</td>
+   *     <td>#{id} 或 #{param1}</td>
+   *   </tr>
+   *   <tr>
+   *     <td>2. 单个Collection/List参数</td>
+   *     <td>List<User> findByIds(List<Integer> ids)</td>
+   *     <td>[[1,2,3]]</td>
+   *     <td>Map: {"collection":[1,2,3], "list":[1,2,3]}</td>
+   *     <td>#{collection[0]} 或 #{list[0]}</td>
+   *   </tr>
+   *   <tr>
+   *     <td>3. 单个Set参数</td>
+   *     <td>List<User> findByIds(Set<Integer> ids)</td>
+   *     <td>[{1,2,3}]</td>
+   *     <td>Map: {"collection":{1,2,3}}</td>
+   *     <td>#{collection[0]}</td>
+   *   </tr>
+   *   <tr>
+   *     <td>4. 单个数组参数</td>
+   *     <td>List<User> findByIds(Integer[] ids)</td>
+   *     <td>[[1,2,3]]</td>
+   *     <td>Map: {"array":[1,2,3]}</td>
+   *     <td>#{array[0]}</td>
+   *   </tr>
+   *   <tr>
+   *     <td>5. 单个POJO参数</td>
+   *     <td>void updateUser(User user)</td>
+   *     <td>[User{id=1,name="Tom"}]</td>
+   *     <td>直接返回: User对象</td>
+   *     <td>#{id}, #{name}</td>
+   *   </tr>
+   *   <tr>
+   *     <td>6. 单个Map参数</td>
+   *     <td>User getByMap(Map<String,Object> param)</td>
+   *     <td>[{"id":1}]</td>
+   *     <td>直接返回: Map对象</td>
+   *     <td>#{id}</td>
+   *   </tr>
+   *   <tr>
+   *     <td>7. 多个参数</td>
+   *     <td>List<User> findUsers(String name, Integer age)</td>
+   *     <td>["Tom", 20]</td>
+   *     <td>Map: {"param1":"Tom", "param2":20}</td>
+   *     <td>#{param1}, #{param2}</td>
+   *   </tr>
+   * </table>
    *
-   * @return the named params
+   * <p>特殊说明：</p>
+   * <ul>
+   *   <li>Collection类型参数会被包装为Map，提供"collection"键访问</li>
+   *   <li>List类型参数额外提供"list"键访问</li>
+   *   <li>数组类型参数使用"array"键访问</li>
+   *   <li>多参数时可以使用@Param注解指定参数名</li>
+   *   <li>RowBounds和ResultHandler类型的参数会被忽略</li>
+   * </ul>
+   *
+   * <p>XML中的访问方式：</p>
+   * <pre>
+   * <!-- 1. 单个参数 -->
+   * #{id} 或 #{param1}
+   *
+   * <!-- 2. 集合参数 -->
+   * <foreach collection="list" item="id">
+   *   #{id}
+   * </foreach>
+   *
+   * <!-- 3. 多参数 -->
+   * #{param1}, #{param2} 或 使用@Param注解指定的名称
+   * </pre>
+   *
+   * @param args Mapper方法的参数数组
+   * @return 转换后的参数对象，可能是原始参数值或ParamMap
    */
   public Object getNamedParams(Object[] args) {
     final int paramCount = names.size();
     if (args == null || paramCount == 0) {
       return null;
-    }
-    if (!hasParamAnnotation && paramCount == 1) {
+    } else if (!hasParamAnnotation && paramCount == 1) {
+      // 单参数且无@Param注解的情况
       Object value = args[names.firstKey()];
-      return wrapToMapIfCollection(value, useActualParamName ? names.get(names.firstKey()) : null);
+      return wrapToMapIfCollection(value);
     } else {
+      // 多参数或有@Param注解的情况
       final Map<String, Object> param = new ParamMap<>();
       int i = 0;
       for (Map.Entry<Integer, String> entry : names.entrySet()) {
+        // 添加参数名到参数值的映射
         param.put(entry.getValue(), args[entry.getKey()]);
-        // add generic param names (param1, param2, ...)
+        // 添加通用参数名（param1, param2, ...）到参数值的映射
         final String genericParamName = GENERIC_NAME_PREFIX + (i + 1);
-        // ensure not to overwrite parameter named with @Param
         if (!names.containsValue(genericParamName)) {
           param.put(genericParamName, args[entry.getKey()]);
         }
@@ -144,34 +290,73 @@ public class ParamNameResolver {
   }
 
   /**
-   * Wrap to a {@link ParamMap} if object is {@link Collection} or array.
+   * 如果参数是集合类型，将其包装为Map
    *
-   * @param object
-   *          a parameter object
-   * @param actualParamName
-   *          an actual parameter name (If specify a name, set an object to {@link ParamMap} with specified name)
+   * <p>优化说明：</p>
+   * <ul>
+   *   <li>使用ParamMap提供类型安全</li>
+   *   <li>为List类型提供双重访问方式（collection和list）</li>
+   *   <li>数组类型统一使用array键访问</li>
+   * </ul>
    *
-   * @return a {@link ParamMap}
+   * <p>SQL中的访问方式：</p>
+   * <pre>
+   * // 对于List参数
+   * #{collection[0]}, #{list[0]}
    *
-   * @since 3.5.5
+   * // 对于数组参数
+   * #{array[0]}
+   *
+   * // 在foreach中使用
+   * <foreach collection="list" item="item">
+   *     #{item}
+   * </foreach>
+   * </pre>
+   *
+   * @param object 要处理的参数对象
+   * @return 处理后的参数对象
    */
-  public static Object wrapToMapIfCollection(Object object, String actualParamName) {
+  private static Object wrapToMapIfCollection(Object object) {
     if (object instanceof Collection) {
       ParamMap<Object> map = new ParamMap<>();
       map.put("collection", object);
       if (object instanceof List) {
         map.put("list", object);
       }
-      Optional.ofNullable(actualParamName).ifPresent(name -> map.put(name, object));
       return map;
-    }
-    if (object != null && object.getClass().isArray()) {
+    } else if (object != null && object.getClass().isArray()) {
       ParamMap<Object> map = new ParamMap<>();
       map.put("array", object);
-      Optional.ofNullable(actualParamName).ifPresent(name -> map.put(name, object));
       return map;
     }
     return object;
+  }
+
+  /**
+   * 判断是否为特殊参数类型
+   * 特殊参数（RowBounds和ResultHandler）会被框架特殊处理，
+   * 不会作为SQL参数传递
+   */
+  private static boolean isSpecialParameter(Class<?> clazz) {
+    return RowBounds.class.isAssignableFrom(clazz) || ResultHandler.class.isAssignableFrom(clazz);
+  }
+
+  /**
+   * 获取参数的实际名称
+   * 通过反射获取方法参数的真实名称，
+   * 需要编译时开启-parameters选项才能获取到
+   */
+  private String getActualParamName(Method method, int paramIndex) {
+    return ParamNameUtil.getParamNames(method).get(paramIndex);
+  }
+
+  /**
+   * 获取参数名称映射
+   *
+   * @return 不可修改的参数名称映射
+   */
+  public String[] getNames() {
+    return names.values().toArray(new String[0]);
   }
 
 }

@@ -306,22 +306,42 @@ public class MapperMethod {
 
   }
 
+  /**
+   * SQL命令类，封装了SQL语句的元数据信息
+   * 主要用于存储SQL语句的类型和标识符
+   */
   public static class SqlCommand {
-
+    /**
+     * SQL语句的名称，通常是 "命名空间.方法名"
+     */
     private final String name;
+
+    /**
+     * SQL语句的类型（INSERT、UPDATE、DELETE、SELECT、FLUSH等）
+     */
     private final SqlCommandType type;
 
+    /**
+     * 构造函数，解析Mapper方法对应的SQL命令信息
+     *
+     * @param configuration MyBatis配置对象
+     * @param mapperInterface Mapper接口类
+     * @param method 方法对象
+     */
     public SqlCommand(Configuration configuration, Class<?> mapperInterface, Method method) {
       final String methodName = method.getName();
       final Class<?> declaringClass = method.getDeclaringClass();
       MappedStatement ms = resolveMappedStatement(mapperInterface, methodName, declaringClass, configuration);
+
+      // 处理@Flush注解的特殊情况
       if (ms == null) {
-        if (method.getAnnotation(Flush.class) == null) {
-          throw new BindingException(
-              "Invalid bound statement (not found): " + mapperInterface.getName() + "." + methodName);
+        if (method.getAnnotation(Flush.class) != null) {
+          name = null;
+          type = SqlCommandType.FLUSH;
+        } else {
+          throw new BindingException("Invalid bound statement (not found): "
+              + mapperInterface.getName() + "." + methodName);
         }
-        name = null;
-        type = SqlCommandType.FLUSH;
       } else {
         name = ms.getId();
         type = ms.getSqlCommandType();
@@ -360,20 +380,61 @@ public class MapperMethod {
     }
   }
 
+  /**
+   * 方法签名类，封装了Mapper方法的签名信息
+   * 负责处理方法的参数和返回值相关的所有操作
+   */
   public static class MethodSignature {
-
+    /**
+     * 是否返回多个结果
+     */
     private final boolean returnsMany;
+    /**
+     * 是否返回Map
+     */
     private final boolean returnsMap;
+    /**
+     * 是否返回void
+     */
     private final boolean returnsVoid;
+    /**
+     * 是否返回Cursor
+     */
     private final boolean returnsCursor;
+    /**
+     * 是否返回Optional
+     */
     private final boolean returnsOptional;
+    /**
+     * 返回类型
+     */
     private final Class<?> returnType;
+    /**
+     * 如果返回Map，指定Map的key
+     */
     private final String mapKey;
+    /**
+     * 结果处理器索引
+     */
     private final Integer resultHandlerIndex;
+    /**
+     * 行绑定索引
+     */
     private final Integer rowBoundsIndex;
+    /**
+     * 参数名解析器
+     */
     private final ParamNameResolver paramNameResolver;
 
+    /**
+     * 构造函数，解析方法签名信息
+     *
+     * @param configuration MyBatis配置对象
+     * @param mapperInterface Mapper接口类
+     * @param method 方法对象
+     */
     public MethodSignature(Configuration configuration, Class<?> mapperInterface, Method method) {
+      // 解析返回类型
       Type resolvedReturnType = TypeParameterResolver.resolveReturnType(method, mapperInterface);
       if (resolvedReturnType instanceof Class<?>) {
         this.returnType = (Class<?>) resolvedReturnType;
@@ -382,35 +443,43 @@ public class MapperMethod {
       } else {
         this.returnType = method.getReturnType();
       }
+
+      // 解析返回值特性
       this.returnsVoid = void.class.equals(this.returnType);
       this.returnsMany = configuration.getObjectFactory().isCollection(this.returnType) || this.returnType.isArray();
       this.returnsCursor = Cursor.class.equals(this.returnType);
       this.returnsOptional = Optional.class.equals(this.returnType);
       this.mapKey = getMapKey(method);
       this.returnsMap = this.mapKey != null;
+
+      // 解析参数特性
       this.rowBoundsIndex = getUniqueParamIndex(method, RowBounds.class);
       this.resultHandlerIndex = getUniqueParamIndex(method, ResultHandler.class);
       this.paramNameResolver = new ParamNameResolver(configuration, method);
     }
 
+    /**
+     * 将方法参数转换为SQL参数
+     *
+     * @param args 方法参数数组
+     * @return 转换后的SQL参数
+     */
     public Object convertArgsToSqlCommandParam(Object[] args) {
       return paramNameResolver.getNamedParams(args);
     }
 
-    public boolean hasRowBounds() {
-      return rowBoundsIndex != null;
+    /**
+     * 提取结果处理器参数
+     */
+    public ResultHandler<?> extractResultHandler(Object[] args) {
+      return hasResultHandler() ? (ResultHandler<?>) args[resultHandlerIndex] : null;
     }
 
+    /**
+     * 提取分页参数
+     */
     public RowBounds extractRowBounds(Object[] args) {
-      return hasRowBounds() ? (RowBounds) args[rowBoundsIndex] : null;
-    }
-
-    public boolean hasResultHandler() {
-      return resultHandlerIndex != null;
-    }
-
-    public ResultHandler extractResultHandler(Object[] args) {
-      return hasResultHandler() ? (ResultHandler) args[resultHandlerIndex] : null;
+      return hasRowBounds() ? (RowBounds) args[rowBoundsIndex] : RowBounds.DEFAULT;
     }
 
     public Class<?> getReturnType() {
@@ -472,6 +541,14 @@ public class MapperMethod {
         }
       }
       return mapKey;
+    }
+
+    public boolean hasRowBounds() {
+      return rowBoundsIndex != null;
+    }
+
+    public boolean hasResultHandler() {
+      return resultHandlerIndex != null;
     }
   }
 
