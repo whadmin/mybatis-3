@@ -27,19 +27,64 @@ import org.apache.ibatis.session.Configuration;
 import org.apache.ibatis.session.SqlSession;
 
 /**
- * @author Clinton Begin
- * @author Eduardo Macarron
- * @author Lasse Voss
+ * Mapper接口注册表，管理Mapper接口和对应代理工厂的注册关系
+ *
+ * <p>主要功能：</p>
+ * <ul>
+ *   <li>注册Mapper接口</li>
+ *   <li>创建Mapper接口的代理实例</li>
+ *   <li>管理Mapper接口的代理工厂</li>
+ *   <li>检查Mapper接口的有效性</li>
+ * </ul>
+ *
+ * <p>工作流程：</p>
+ * <ul>
+ *   <li>1. 扫描并注册Mapper接口</li>
+ *   <li>2. 为每个Mapper接口创建代理工厂</li>
+ *   <li>3. 根据需要生成Mapper接口的代理实例</li>
+ *   <li>4. 缓存和复用代理工厂</li>
+ * </ul>
+ *
+ * <p>注意事项：</p>
+ * <ul>
+ *   <li>Mapper接口必须是接口而不能是类</li>
+ *   <li>同一个Mapper接口只能注册一次</li>
+ *   <li>注册后的Mapper对所有SqlSession可见</li>
+ *   <li>代理工厂会被缓存以提升性能</li>
+ * </ul>
  */
 public class MapperRegistry {
 
+  /**
+   * MyBatis配置对象，包含完整的映射器配置信息
+   */
   private final Configuration config;
+
+  /**
+   * 已知Mapper接口的代理工厂映射表
+   * Key: Mapper接口类
+   * Value: 对应的代理工厂
+   */
   private final Map<Class<?>, MapperProxyFactory<?>> knownMappers = new ConcurrentHashMap<>();
 
+  /**
+   * 构造函数
+   *
+   * @param config MyBatis配置对象
+   */
   public MapperRegistry(Configuration config) {
     this.config = config;
   }
 
+  /**
+   * 获取Mapper接口的代理实例
+   *
+   * @param <T> Mapper接口类型
+   * @param type Mapper接口类
+   * @param sqlSession 当前SqlSession
+   * @return Mapper接口的代理实例
+   * @throws BindingException 当Mapper未注册或创建代理实例失败时
+   */
   @SuppressWarnings("unchecked")
   public <T> T getMapper(Class<T> type, SqlSession sqlSession) {
     final MapperProxyFactory<T> mapperProxyFactory = (MapperProxyFactory<T>) knownMappers.get(type);
@@ -53,10 +98,32 @@ public class MapperRegistry {
     }
   }
 
+  /**
+   * 检查指定的Mapper接口是否已注册
+   *
+   * @param <T> Mapper接口类型
+   * @param type Mapper接口类
+   * @return 如果已注册返回true，否则返回false
+   */
   public <T> boolean hasMapper(Class<T> type) {
     return knownMappers.containsKey(type);
   }
 
+  /**
+   * 添加Mapper接口到注册表
+   *
+   * <p>处理流程：</p>
+   * <ol>
+   *   <li>检查是否为接口</li>
+   *   <li>检查是否已经注册</li>
+   *   <li>创建代理工厂</li>
+   *   <li>解析接口注解</li>
+   * </ol>
+   *
+   * @param <T> Mapper接口类型
+   * @param type Mapper接口类
+   * @throws BindingException 当类型不是接口或已经注册时
+   */
   public <T> void addMapper(Class<T> type) {
     if (type.isInterface()) {
       if (hasMapper(type)) {
@@ -65,9 +132,8 @@ public class MapperRegistry {
       boolean loadCompleted = false;
       try {
         knownMappers.put(type, new MapperProxyFactory<>(type));
-        // It's important that the type is added before the parser is run
-        // otherwise the binding may automatically be attempted by the
-        // mapper parser. If the type is already known, it won't try.
+        // 在解析注解之前必须先添加到knownMappers
+        // 否则可能会导致注解解析时的自动绑定失败
         MapperAnnotationBuilder parser = new MapperAnnotationBuilder(config, type);
         parser.parse();
         loadCompleted = true;
@@ -80,25 +146,19 @@ public class MapperRegistry {
   }
 
   /**
-   * Gets the mappers.
+   * 获取所有已注册的Mapper接口类
    *
-   * @return the mappers
-   *
-   * @since 3.2.2
+   * @return Mapper接口类集合（只读）
    */
   public Collection<Class<?>> getMappers() {
     return Collections.unmodifiableCollection(knownMappers.keySet());
   }
 
   /**
-   * Adds the mappers.
+   * 扫描指定包下的所有Mapper接口并注册
    *
-   * @param packageName
-   *          the package name
-   * @param superType
-   *          the super type
-   *
-   * @since 3.2.2
+   * @param packageName 包名
+   * @param superType 父类型，用于过滤
    */
   public void addMappers(String packageName, Class<?> superType) {
     ResolverUtil<Class<?>> resolverUtil = new ResolverUtil<>();
@@ -110,12 +170,9 @@ public class MapperRegistry {
   }
 
   /**
-   * Adds the mappers.
+   * 扫描指定包下的所有类并注册为Mapper
    *
-   * @param packageName
-   *          the package name
-   *
-   * @since 3.2.2
+   * @param packageName 包名
    */
   public void addMappers(String packageName) {
     addMappers(packageName, Object.class);
