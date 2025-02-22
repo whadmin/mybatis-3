@@ -57,23 +57,45 @@ import org.apache.ibatis.util.MapUtil;
 public class MapperProxy<T> implements InvocationHandler, Serializable {
 
   private static final long serialVersionUID = -4724728412955527868L;
+
+  /**
+   * 定义允许的方法查找模式，包括私有、保护、包级别和公共方法的访问权限
+   */
   private static final int ALLOWED_MODES = MethodHandles.Lookup.PRIVATE | MethodHandles.Lookup.PROTECTED
       | MethodHandles.Lookup.PACKAGE | MethodHandles.Lookup.PUBLIC;
+
+  /**
+   * 用于Java 8中获取方法句柄的构造器
+   */
   private static final Constructor<Lookup> lookupConstructor;
+
+  /**
+   * 用于Java 9及以上版本获取私有方法查找器的方法
+   */
   private static final Method privateLookupInMethod;
+
+  /**
+   * 维护的SqlSession实例，用于执行SQL操作
+   */
   private final SqlSession sqlSession;
+
+  /**
+   * Mapper接口的Class对象
+   */
   private final Class<T> mapperInterface;
+
+  /**
+   * 缓存方法的调用器，避免重复创建MapperMethod对象
+   */
   private final Map<Method, MapperMethodInvoker> methodCache;
 
-  public MapperProxy(SqlSession sqlSession, Class<T> mapperInterface, Map<Method, MapperMethodInvoker> methodCache) {
-    this.sqlSession = sqlSession;
-    this.mapperInterface = mapperInterface;
-    this.methodCache = methodCache;
-  }
-
+  /**
+   * 静态初始化块，初始化Java版本相关的反射工具
+   */
   static {
     Method privateLookupIn;
     try {
+      // 尝试获取Java 9+的privateLookupIn方法
       privateLookupIn = MethodHandles.class.getMethod("privateLookupIn", Class.class, MethodHandles.Lookup.class);
     } catch (NoSuchMethodException e) {
       privateLookupIn = null;
@@ -82,7 +104,7 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
 
     Constructor<Lookup> lookup = null;
     if (privateLookupInMethod == null) {
-      // JDK 1.8
+      // 如果是Java 8，则使用Lookup构造器
       try {
         lookup = MethodHandles.Lookup.class.getDeclaredConstructor(Class.class, int.class);
         lookup.setAccessible(true);
@@ -97,25 +119,54 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
     lookupConstructor = lookup;
   }
 
+  /**
+   * 构造函数，初始化代理所需的核心成员
+   */
+  public MapperProxy(SqlSession sqlSession, Class<T> mapperInterface, Map<Method, MapperMethodInvoker> methodCache) {
+    this.sqlSession = sqlSession;
+    this.mapperInterface = mapperInterface;
+    this.methodCache = methodCache;
+  }
+
+  /**
+   * 代理方法的主要实现，处理所有的方法调用
+   *
+   * @param proxy 代理对象
+   * @param method 被调用的方法
+   * @param args 方法参数
+   * @return 方法执行结果
+   * @throws Throwable 执行过程中可能抛出的异常
+   */
   @Override
   public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
     try {
+      // 如果是Object类的方法，直接调用
       if (Object.class.equals(method.getDeclaringClass())) {
         return method.invoke(this, args);
       }
+      // 对于Mapper接口方法，使用缓存的调用器执行
       return cachedInvoker(method).invoke(proxy, method, args, sqlSession);
     } catch (Throwable t) {
       throw ExceptionUtil.unwrapThrowable(t);
     }
   }
 
+  /**
+   * 获取方法的调用器，如果缓存中没有则创建新的调用器
+   *
+   * @param method 需要执行的方法
+   * @return 方法调用器
+   * @throws Throwable 创建调用器过程中可能抛出的异常
+   */
   private MapperMethodInvoker cachedInvoker(Method method) throws Throwable {
     try {
       return MapUtil.computeIfAbsent(methodCache, method, m -> {
         if (!m.isDefault()) {
+          // 非默认方法，创建普通方法调用器
           return new PlainMethodInvoker(new MapperMethod(mapperInterface, method, sqlSession.getConfiguration()));
         }
         try {
+          // 默认方法，根据Java版本选择不同的方法句柄获取方式
           if (privateLookupInMethod == null) {
             return new DefaultMethodInvoker(getMethodHandleJava8(method));
           }
@@ -131,6 +182,9 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
     }
   }
 
+  /**
+   * 获取Java 9及以上版本的方法句柄
+   */
   private MethodHandle getMethodHandleJava9(Method method)
       throws NoSuchMethodException, IllegalAccessException, InvocationTargetException {
     final Class<?> declaringClass = method.getDeclaringClass();
@@ -139,17 +193,42 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
         declaringClass);
   }
 
+  /**
+   * 获取Java 8版本的方法句柄
+   */
   private MethodHandle getMethodHandleJava8(Method method)
       throws IllegalAccessException, InstantiationException, InvocationTargetException {
     final Class<?> declaringClass = method.getDeclaringClass();
     return lookupConstructor.newInstance(declaringClass, ALLOWED_MODES).unreflectSpecial(method, declaringClass);
   }
 
+  /**
+   * Mapper方法调用器接口，定义了执行Mapper方法的标准
+   * 用于统一处理普通方法和默认方法的调用逻辑
+   */
   interface MapperMethodInvoker {
+    /**
+     * 执行Mapper方法
+     *
+     * @param proxy 代理对象
+     * @param method 要执行的方法
+     * @param args 方法参数
+     * @param sqlSession SQL会话对象
+     * @return 方法执行结果
+     * @throws Throwable 执行过程中可能抛出的异常
+     */
     Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable;
   }
 
+  /**
+   * 普通方法调用器实现类
+   * 用于处理Mapper接口中的普通方法（非默认方法）
+   * 将方法调用委托给MapperMethod执行具体的数据库操作
+   */
   private static class PlainMethodInvoker implements MapperMethodInvoker {
+    /**
+     * MapperMethod实例，封装了SQL操作的具体执行逻辑
+     */
     private final MapperMethod mapperMethod;
 
     public PlainMethodInvoker(MapperMethod mapperMethod) {
@@ -158,11 +237,20 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
+      // 委托给MapperMethod执行实际的数据库操作
       return mapperMethod.execute(sqlSession, args);
     }
   }
 
+  /**
+   * 默认方法调用器实现类
+   * 用于处理Mapper接口中的默认方法（Java 8特性）
+   * 通过方法句柄（MethodHandle）直接调用接口的默认实现
+   */
   private static class DefaultMethodInvoker implements MapperMethodInvoker {
+    /**
+     * 方法句柄，用于调用接口的默认方法实现
+     */
     private final MethodHandle methodHandle;
 
     public DefaultMethodInvoker(MethodHandle methodHandle) {
@@ -171,6 +259,7 @@ public class MapperProxy<T> implements InvocationHandler, Serializable {
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args, SqlSession sqlSession) throws Throwable {
+      // 将方法句柄绑定到代理对象并执行默认方法
       return methodHandle.bindTo(proxy).invokeWithArguments(args);
     }
   }
