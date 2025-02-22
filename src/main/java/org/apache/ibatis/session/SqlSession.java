@@ -24,357 +24,314 @@ import org.apache.ibatis.cursor.Cursor;
 import org.apache.ibatis.executor.BatchResult;
 
 /**
- * The primary Java interface for working with MyBatis. Through this interface you can execute commands, get mappers and
- * manage transactions.
+ * MyBatis的核心接口，提供数据库操作和事务管理的主要方法
+ *
+ * <p>主要功能：</p>
+ * <ul>
+ *   <li>执行SQL语句（增删改查）</li>
+ *   <li>批量更新操作</li>
+ *   <li>事务控制</li>
+ *   <li>获取映射器</li>
+ * </ul>
+ *
+ * <p>事务管理：</p>
+ * <ul>
+ *   <li>commit()：提交事务</li>
+ *   <li>rollback()：回滚事务</li>
+ *   <li>close()：关闭会话</li>
+ * </ul>
+ *
+ * <p>查询方法：</p>
+ * <ul>
+ *   <li>selectOne：查询单条记录</li>
+ *   <li>selectList：查询多条记录</li>
+ *   <li>selectMap：将查询结果转为Map</li>
+ *   <li>selectCursor：流式查询</li>
+ *   <li>select：使用ResultHandler处理结果</li>
+ * </ul>
+ *
+ * <p>更新方法：</p>
+ * <ul>
+ *   <li>insert：插入记录</li>
+ *   <li>update：更新记录</li>
+ *   <li>delete：删除记录</li>
+ * </ul>
+ *
+ * <p>注意事项：</p>
+ * <ul>
+ *   <li>非线程安全，每个线程应该使用独立的SqlSession实例</li>
+ *   <li>使用完后必须关闭，建议使用try-with-resources语法</li>
+ *   <li>默认不自动提交事务，需要手动调用commit</li>
+ * </ul>
+ *
+ * <p>使用示例：</p>
+ * <pre>
+ * try (SqlSession session = sqlSessionFactory.openSession()) {
+ *   UserMapper mapper = session.getMapper(UserMapper.class);
+ *   User user = mapper.getById(1);
+ *   session.commit();
+ * }
+ * </pre>
  *
  * @author Clinton Begin
  */
 public interface SqlSession extends Closeable {
 
   /**
-   * Retrieve a single row mapped from the statement key.
+   * 根据指定的SQL ID查询单条记录
    *
-   * @param <T>
-   *          the returned object type
-   * @param statement
-   *          the statement
-   *
-   * @return Mapped object
+   * @param <T> 返回对象类型
+   * @param statement SQL语句的唯一标识
+   * @return 查询结果对象，如果未找到返回null
    */
   <T> T selectOne(String statement);
 
   /**
-   * Retrieve a single row mapped from the statement key and parameter.
+   * 根据指定的SQL ID和参数查询单条记录
    *
-   * @param <T>
-   *          the returned object type
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   *
-   * @return Mapped object
+   * @param <T> 返回对象类型
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @return 查询结果对象，如果未找到返回null
    */
   <T> T selectOne(String statement, Object parameter);
 
   /**
-   * Retrieve a list of mapped objects from the statement key.
+   * 根据指定的SQL ID查询多条记录
    *
-   * @param <E>
-   *          the returned list element type
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   *
-   * @return List of mapped object
+   * @param <E> 返回列表元素类型
+   * @param statement SQL语句的唯一标识
+   * @return 查询结果列表
    */
   <E> List<E> selectList(String statement);
 
   /**
-   * Retrieve a list of mapped objects from the statement key and parameter.
+   * 根据指定的SQL ID和参数查询多条记录
    *
-   * @param <E>
-   *          the returned list element type
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   *
-   * @return List of mapped object
+   * @param <E> 返回列表元素类型
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @return 查询结果列表
    */
   <E> List<E> selectList(String statement, Object parameter);
 
   /**
-   * Retrieve a list of mapped objects from the statement key and parameter, within the specified row bounds.
+   * 根据指定的SQL ID和参数查询多条记录，并进行分页
    *
-   * @param <E>
-   *          the returned list element type
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   * @param rowBounds
-   *          Bounds to limit object retrieval
-   *
-   * @return List of mapped object
+   * @param <E> 返回列表元素类型
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @param rowBounds 分页参数
+   * @return 查询结果列表
    */
   <E> List<E> selectList(String statement, Object parameter, RowBounds rowBounds);
 
   /**
-   * The selectMap is a special case in that it is designed to convert a list of results into a Map based on one of the
-   * properties in the resulting objects. Eg. Return a of Map[Integer,Author] for selectMap("selectAuthors","id")
+   * 将查询结果转换为Map，其中Map的key为指定的属性值
    *
-   * @param <K>
-   *          the returned Map keys type
-   * @param <V>
-   *          the returned Map values type
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param mapKey
-   *          The property to use as key for each value in the list.
-   *
-   * @return Map containing key pair data.
+   * @param <K> Map键类型
+   * @param <V> Map值类型
+   * @param statement SQL语句的唯一标识
+   * @param mapKey 作为Map键的属性名
+   * @return 转换后的Map对象
    */
   <K, V> Map<K, V> selectMap(String statement, String mapKey);
 
   /**
-   * The selectMap is a special case in that it is designed to convert a list of results into a Map based on one of the
-   * properties in the resulting objects.
+   * 根据参数查询并将结果转换为Map，其中Map的key为指定的属性值
    *
-   * @param <K>
-   *          the returned Map keys type
-   * @param <V>
-   *          the returned Map values type
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   * @param mapKey
-   *          The property to use as key for each value in the list.
-   *
-   * @return Map containing key pair data.
+   * @param <K> Map键类型
+   * @param <V> Map值类型
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @param mapKey 作为Map键的属性名
+   * @return 转换后的Map对象
    */
   <K, V> Map<K, V> selectMap(String statement, Object parameter, String mapKey);
 
   /**
-   * The selectMap is a special case in that it is designed to convert a list of results into a Map based on one of the
-   * properties in the resulting objects.
+   * 根据参数查询并将结果转换为Map，支持分页，其中Map的key为指定的属性值
    *
-   * @param <K>
-   *          the returned Map keys type
-   * @param <V>
-   *          the returned Map values type
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   * @param mapKey
-   *          The property to use as key for each value in the list.
-   * @param rowBounds
-   *          Bounds to limit object retrieval
-   *
-   * @return Map containing key pair data.
+   * @param <K> Map键类型
+   * @param <V> Map值类型
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @param mapKey 作为Map键的属性名
+   * @param rowBounds 分页参数
+   * @return 转换后的Map对象
    */
   <K, V> Map<K, V> selectMap(String statement, Object parameter, String mapKey, RowBounds rowBounds);
 
   /**
-   * A Cursor offers the same results as a List, except it fetches data lazily using an Iterator.
+   * 查询数据并返回Cursor对象，用于流式查询
    *
-   * @param <T>
-   *          the returned cursor element type.
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   *
-   * @return Cursor of mapped objects
+   * @param <T> 返回对象类型
+   * @param statement SQL语句的唯一标识
+   * @return Cursor对象，用于遍历查询结果
    */
   <T> Cursor<T> selectCursor(String statement);
 
   /**
-   * A Cursor offers the same results as a List, except it fetches data lazily using an Iterator.
+   * 根据参数查询数据并返回Cursor对象，用于流式查询
    *
-   * @param <T>
-   *          the returned cursor element type.
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   *
-   * @return Cursor of mapped objects
+   * @param <T> 返回对象类型
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @return Cursor对象，用于遍历查询结果
    */
   <T> Cursor<T> selectCursor(String statement, Object parameter);
 
   /**
-   * A Cursor offers the same results as a List, except it fetches data lazily using an Iterator.
+   * 根据参数查询数据并返回Cursor对象，支持分页，用于流式查询
    *
-   * @param <T>
-   *          the returned cursor element type.
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   * @param rowBounds
-   *          Bounds to limit object retrieval
-   *
-   * @return Cursor of mapped objects
+   * @param <T> 返回对象类型
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @param rowBounds 分页参数
+   * @return Cursor对象，用于遍历查询结果
    */
   <T> Cursor<T> selectCursor(String statement, Object parameter, RowBounds rowBounds);
 
   /**
-   * Retrieve a single row mapped from the statement key and parameter using a {@code ResultHandler}.
+   * 使用自定义ResultHandler处理查询结果
    *
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   * @param handler
-   *          ResultHandler that will handle each retrieved row
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @param handler 结果处理器
    */
   void select(String statement, Object parameter, ResultHandler handler);
 
   /**
-   * Retrieve a single row mapped from the statement using a {@code ResultHandler}.
+   * 使用自定义ResultHandler处理查询结果
    *
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param handler
-   *          ResultHandler that will handle each retrieved row
+   * @param statement SQL语句的唯一标识
+   * @param handler 结果处理器
    */
   void select(String statement, ResultHandler handler);
 
   /**
-   * Retrieve a single row mapped from the statement key and parameter using a {@code ResultHandler} and
-   * {@code RowBounds}.
+   * 使用自定义ResultHandler处理查询结果，支持分页
    *
-   * @param statement
-   *          Unique identifier matching the statement to use.
-   * @param parameter
-   *          the parameter
-   * @param rowBounds
-   *          RowBound instance to limit the query results
-   * @param handler
-   *          ResultHandler that will handle each retrieved row
+   * @param statement SQL语句的唯一标识
+   * @param parameter 查询参数
+   * @param rowBounds 分页参数
+   * @param handler 结果处理器
    */
   void select(String statement, Object parameter, RowBounds rowBounds, ResultHandler handler);
 
   /**
-   * Execute an insert statement.
+   * 执行插入语句
    *
-   * @param statement
-   *          Unique identifier matching the statement to execute.
-   *
-   * @return int The number of rows affected by the insert.
+   * @param statement SQL语句的唯一标识
+   * @return 受影响的行数
    */
   int insert(String statement);
 
   /**
-   * Execute an insert statement with the given parameter object. Any generated autoincrement values or selectKey
-   * entries will modify the given parameter object properties. Only the number of rows affected will be returned.
+   * 执行带参数的插入语句
    *
-   * @param statement
-   *          Unique identifier matching the statement to execute.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   *
-   * @return int The number of rows affected by the insert.
+   * @param statement SQL语句的唯一标识
+   * @param parameter 插入参数
+   * @return 受影响的行数
    */
   int insert(String statement, Object parameter);
 
   /**
-   * Execute an update statement. The number of rows affected will be returned.
+   * 执行更新语句
    *
-   * @param statement
-   *          Unique identifier matching the statement to execute.
-   *
-   * @return int The number of rows affected by the update.
+   * @param statement SQL语句的唯一标识
+   * @return 受影响的行数
    */
   int update(String statement);
 
   /**
-   * Execute an update statement. The number of rows affected will be returned.
+   * 执行带参数的更新语句
    *
-   * @param statement
-   *          Unique identifier matching the statement to execute.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   *
-   * @return int The number of rows affected by the update.
+   * @param statement SQL语句的唯一标识
+   * @param parameter 更新参数
+   * @return 受影响的行数
    */
   int update(String statement, Object parameter);
 
   /**
-   * Execute a delete statement. The number of rows affected will be returned.
+   * 执行删除语句
    *
-   * @param statement
-   *          Unique identifier matching the statement to execute.
-   *
-   * @return int The number of rows affected by the delete.
+   * @param statement SQL语句的唯一标识
+   * @return 受影响的行数
    */
   int delete(String statement);
 
   /**
-   * Execute a delete statement. The number of rows affected will be returned.
+   * 执行带参数的删除语句
    *
-   * @param statement
-   *          Unique identifier matching the statement to execute.
-   * @param parameter
-   *          A parameter object to pass to the statement.
-   *
-   * @return int The number of rows affected by the delete.
+   * @param statement SQL语句的唯一标识
+   * @param parameter 删除参数
+   * @return 受影响的行数
    */
   int delete(String statement, Object parameter);
 
   /**
-   * Flushes batch statements and commits database connection. Note that database connection will not be committed if no
-   * updates/deletes/inserts were called. To force the commit call {@link SqlSession#commit(boolean)}
+   * 提交事务
    */
   void commit();
 
   /**
-   * Flushes batch statements and commits database connection.
+   * 提交事务
    *
-   * @param force
-   *          forces connection commit
+   * @param force 是否强制提交
    */
   void commit(boolean force);
 
   /**
-   * Discards pending batch statements and rolls database connection back. Note that database connection will not be
-   * rolled back if no updates/deletes/inserts were called. To force the rollback call
-   * {@link SqlSession#rollback(boolean)}
+   * 回滚事务
    */
   void rollback();
 
   /**
-   * Discards pending batch statements and rolls database connection back. Note that database connection will not be
-   * rolled back if no updates/deletes/inserts were called.
+   * 回滚事务
    *
-   * @param force
-   *          forces connection rollback
+   * @param force 是否强制回滚
    */
   void rollback(boolean force);
 
   /**
-   * Flushes batch statements.
+   * 刷新批处理语句
    *
-   * @return BatchResult list of updated records
-   *
-   * @since 3.0.6
+   * @return 批处理结果列表
    */
   List<BatchResult> flushStatements();
 
   /**
-   * Closes the session.
+   * 关闭Session
    */
   @Override
   void close();
 
   /**
-   * Clears local session cache.
+   * 清空本地缓存
    */
   void clearCache();
 
   /**
-   * Retrieves current configuration.
+   * 获取配置对象
    *
-   * @return Configuration
+   * @return Configuration对象
    */
   Configuration getConfiguration();
 
   /**
-   * Retrieves a mapper.
+   * 获取指定类型的Mapper接口实现
    *
-   * @param <T>
-   *          the mapper type
-   * @param type
-   *          Mapper interface class
-   *
-   * @return a mapper bound to this SqlSession
+   * @param <T> Mapper接口类型
+   * @param type Mapper接口类
+   * @return Mapper接口实现对象
    */
   <T> T getMapper(Class<T> type);
 
   /**
-   * Retrieves inner database connection.
+   * 获取数据库连接
    *
-   * @return Connection
+   * @return 数据库连接对象
    */
   Connection getConnection();
 }

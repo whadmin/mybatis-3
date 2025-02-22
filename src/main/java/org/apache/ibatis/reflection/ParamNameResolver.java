@@ -21,6 +21,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
@@ -132,130 +133,6 @@ public class ParamNameResolver {
   /**
    * 将Mapper接口方法的参数转换为SqlSession执行时需要的参数
    *
-   * <p>参数转换规则（按参数个数）：</p>
-   * <ul>
-   *   <li>无参数：返回null</li>
-   *   <li>单个参数：根据参数类型和注解决定是否包装</li>
-   *   <li>多个参数：返回ParamMap封装的参数</li>
-   * </ul>
-   *
-   * <p>详细的参数处理场景：</p>
-   *
-   * <p>1. 单个基本类型参数：</p>
-   * <pre>
-   * User getById(Integer id)
-   * 输入参数：[1]
-   * 返回结果：1
-   * XML访问：#{id} 或 #{param1}
-   * </pre>
-   *
-   * <p>2. 单个对象参数（带@Param注解）：</p>
-   * <pre>
-   * void updateUser(@Param("userData") User user)
-   * 输入参数：[User{id=1,name="Tom"}]
-   * 返回结果：{
-   *   "userData": User对象,
-   *   "param1": User对象
-   * }
-   * XML访问：#{userData.id} 或 #{param1.id}
-   * </pre>
-   *
-   * <p>3. 多个基本类型参数：</p>
-   * <pre>
-   * List<User> findUsers(String name, Integer age)
-   * 输入参数：["Tom", 20]
-   * 返回结果（useActualParamName=true）：{
-   *   "name": "Tom",
-   *   "age": 20,
-   *   "param1": "Tom",
-   *   "param2": 20
-   * }
-   * 返回结果（useActualParamName=false）：{
-   *   "0": "Tom",
-   *   "1": 20,
-   *   "param1": "Tom",
-   *   "param2": 20
-   * }
-   * XML访问：#{name}, #{age} 或 #{param1}, #{param2}
-   * </pre>
-   *
-   * <p>4. 多个混合类型参数：</p>
-   * <pre>
-   * List<User> findUsersComplex(String name, User user)
-   * 输入参数：["Tom", User{id=1}]
-   * 返回结果（useActualParamName=true）：{
-   *   "name": "Tom",
-   *   "user": User对象,
-   *   "param1": "Tom",
-   *   "param2": User对象
-   * }
-   * XML访问：#{name}, #{user.id} 或 #{param1}, #{param2.id}
-   * </pre>
-   *
-   * <p>5. 带@Param注解的参数：</p>
-   * <pre>
-   * List<User> findUsers(@Param("userName") String name, @Param("userAge") Integer age)
-   * 输入参数：["Tom", 20]
-   * 返回结果：{
-   *   "userName": "Tom",
-   *   "userAge": 20,
-   *   "param1": "Tom",
-   *   "param2": 20
-   * }
-   * XML访问：#{userName}, #{userAge}
-   * </pre>
-   *
-   * <p>6. 集合类型参数：</p>
-   * <pre>
-   * List<User> findByIds(List<Integer> ids)
-   * 输入参数：[[1,2,3]]
-   * 返回结果：{
-   *   "ids": [1,2,3],
-   *   "collection": [1,2,3],
-   *   "list": [1,2,3]
-   * }
-   * XML访问：
-   * #{list[0]} 或
-   * <foreach collection="list" item="id">#{id}</foreach>
-   * </pre>
-   *
-   * <p>7. 数组类型参数：</p>
-   * <pre>
-   * List<User> findByNames(String[] names)
-   * 输入参数：[["Tom","Jerry"]]
-   * 返回结果：{
-   *   "names": ["Tom","Jerry"],
-   *   "array": ["Tom","Jerry"]
-   * }
-   * XML访问：
-   * #{array[0]} 或
-   * <foreach collection="array" item="name">#{name}</foreach>
-   * </pre>
-   *
-   * <p>8. 特殊类型参数：</p>
-   * <pre>
-   * List<User> findUsers(String name, RowBounds rb, ResultHandler h)
-   * 输入参数：["Tom", rb, h]
-   * 返回结果："Tom"
-   * XML访问：#{param1}
-   * </pre>
-   *
-   * <p>参数名解析优先级：</p>
-   * <ol>
-   *   <li>@Param注解指定的名称</li>
-   *   <li>useActualParamName=true时的参数实际名称</li>
-   *   <li>参数索引作为名称（"0", "1", ...）</li>
-   *   <li>默认参数名（"param1", "param2", ...）</li>
-   * </ol>
-   *
-   * <p>特殊说明：</p>
-   * <ul>
-   *   <li>单个参数且无@Param注解时，通常直接返回参数值</li>
-   *   <li>集合类型参数会被包装为Map，提供多种访问方式</li>
-   *   <li>RowBounds和ResultHandler类型参数会被忽略</li>
-   *   <li>useActualParamName配置影响参数名生成，但不影响@Param注解的结果</li>
-   * </ul>
-   *
    * @param args Mapper方法的参数数组
    * @return 转换后的参数对象，可能是原始参数值或ParamMap
    */
@@ -266,7 +143,7 @@ public class ParamNameResolver {
     } else if (!hasParamAnnotation && paramCount == 1) {
       // 单参数且无@Param注解的情况
       Object value = args[names.firstKey()];
-      return wrapToMapIfCollection(value);
+      return wrapToMapIfCollection(value, useActualParamName ? names.get(names.firstKey()) : null);
     } else {
       // 多参数或有@Param注解的情况
       final Map<String, Object> param = new ParamMap<>();
@@ -312,17 +189,20 @@ public class ParamNameResolver {
    * @param object 要处理的参数对象
    * @return 处理后的参数对象
    */
-  private static Object wrapToMapIfCollection(Object object) {
+  public static Object wrapToMapIfCollection(Object object, String actualParamName) {
     if (object instanceof Collection) {
       ParamMap<Object> map = new ParamMap<>();
       map.put("collection", object);
       if (object instanceof List) {
         map.put("list", object);
       }
+      Optional.ofNullable(actualParamName).ifPresent(name -> map.put(name, object));
       return map;
-    } else if (object != null && object.getClass().isArray()) {
+    }
+    if (object != null && object.getClass().isArray()) {
       ParamMap<Object> map = new ParamMap<>();
       map.put("array", object);
+      Optional.ofNullable(actualParamName).ifPresent(name -> map.put(name, object));
       return map;
     }
     return object;

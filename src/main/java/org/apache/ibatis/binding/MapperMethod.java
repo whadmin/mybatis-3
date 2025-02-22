@@ -202,7 +202,18 @@ public class MapperMethod {
 
   /**
    * 使用ResultHandler执行查询
-   * 处理使用自定义ResultHandler的查询操作
+   *
+   * <p>处理流程：</p>
+   * <ol>
+   *   <li>验证返回类型配置的正确性</li>
+   *   <li>转换参数</li>
+   *   <li>处理分页参数</li>
+   *   <li>执行查询</li>
+   * </ol>
+   *
+   * @param sqlSession 当前SqlSession
+   * @param args 方法参数
+   * @throws BindingException 当缺少必要的返回类型配置时
    */
   private void executeWithResultHandler(SqlSession sqlSession, Object[] args) {
     MappedStatement ms = sqlSession.getConfiguration().getMappedStatement(command.getName());
@@ -223,7 +234,18 @@ public class MapperMethod {
 
   /**
    * 执行返回多个结果的查询
-   * 处理返回List、Array等集合类型的查询操作
+   *
+   * <p>处理流程：</p>
+   * <ol>
+   *   <li>转换参数</li>
+   *   <li>处理分页参数</li>
+   *   <li>执行查询获取List结果</li>
+   *   <li>根据需要转换为数组或指定集合类型</li>
+   * </ol>
+   *
+   * @param sqlSession 当前SqlSession
+   * @param args 方法参数
+   * @return 转换后的查询结果，可能是List、数组或其他集合类型
    */
   private <E> Object executeForMany(SqlSession sqlSession, Object[] args) {
     List<E> result;
@@ -246,7 +268,17 @@ public class MapperMethod {
 
   /**
    * 执行返回Cursor的查询
-   * 处理返回Cursor类型的查询操作，用于流式查询
+   *
+   * <p>处理流程：</p>
+   * <ol>
+   *   <li>转换参数</li>
+   *   <li>处理分页参数</li>
+   *   <li>执行流式查询</li>
+   * </ol>
+   *
+   * @param sqlSession 当前SqlSession
+   * @param args 方法参数
+   * @return Cursor对象，用于流式处理查询结果
    */
   private <T> Cursor<T> executeForCursor(SqlSession sqlSession, Object[] args) {
     Cursor<T> result;
@@ -260,6 +292,13 @@ public class MapperMethod {
     return result;
   }
 
+  /**
+   * 将List转换为指定的集合类型
+   *
+   * @param config MyBatis配置对象
+   * @param list 原始查询结果
+   * @return 转换后的集合对象
+   */
   private <E> Object convertToDeclaredCollection(Configuration config, List<E> list) {
     Object collection = config.getObjectFactory().create(method.getReturnType());
     MetaObject metaObject = config.newMetaObject(collection);
@@ -267,6 +306,19 @@ public class MapperMethod {
     return collection;
   }
 
+  /**
+   * 将List转换为数组
+   *
+   * <p>处理流程：</p>
+   * <ol>
+   *   <li>创建指定类型的数组</li>
+   *   <li>区分处理基本类型和对象类型</li>
+   *   <li>复制数据到数组</li>
+   * </ol>
+   *
+   * @param list 要转换的List
+   * @return 转换后的数组
+   */
   @SuppressWarnings("unchecked")
   private <E> Object convertToArray(List<E> list) {
     Class<?> arrayComponentType = method.getReturnType().getComponentType();
@@ -280,6 +332,20 @@ public class MapperMethod {
     return array;
   }
 
+  /**
+   * 执行返回Map的查询
+   *
+   * <p>处理流程：</p>
+   * <ol>
+   *   <li>转换参数</li>
+   *   <li>处理分页参数</li>
+   *   <li>使用指定的mapKey执行查询</li>
+   * </ol>
+   *
+   * @param sqlSession 当前SqlSession
+   * @param args 方法参数
+   * @return 查询结果Map
+   */
   private <K, V> Map<K, V> executeForMap(SqlSession sqlSession, Object[] args) {
     Map<K, V> result;
     Object param = method.convertArgsToSqlCommandParam(args);
@@ -292,10 +358,26 @@ public class MapperMethod {
     return result;
   }
 
+  /**
+   * 自定义Map实现，用于参数映射
+   *
+   * <p>特性：</p>
+   * <ul>
+   *   <li>继承HashMap</li>
+   *   <li>重写get方法，增加参数不存在时的异常提示</li>
+   *   <li>用于更友好的参数错误提示</li>
+   * </ul>
+   */
   public static class ParamMap<V> extends HashMap<String, V> {
-
     private static final long serialVersionUID = -2212268410512043556L;
 
+    /**
+     * 重写get方法，增加参数检查
+     *
+     * @param key 参数名
+     * @return 参数值
+     * @throws BindingException 当参数不存在时
+     */
     @Override
     public V get(Object key) {
       if (!super.containsKey(key)) {
@@ -303,7 +385,6 @@ public class MapperMethod {
       }
       return super.get(key);
     }
-
   }
 
   /**
@@ -324,28 +405,50 @@ public class MapperMethod {
     /**
      * 构造函数，解析Mapper方法对应的SQL命令信息
      *
+     * <p>解析流程：</p>
+     * <ol>
+     *   <li>获取方法名和声明类</li>
+     *   <li>解析对应的MappedStatement</li>
+     *   <li>处理@Flush注解的特殊情况</li>
+     *   <li>设置SQL命令的名称和类型</li>
+     * </ol>
+     *
+     * <p>异常情况：</p>
+     * <ul>
+     *   <li>找不到对应的MappedStatement且没有@Flush注解时抛出BindingException</li>
+     *   <li>SQL命令类型为UNKNOWN时抛出BindingException</li>
+     * </ul>
+     *
      * @param configuration MyBatis配置对象
      * @param mapperInterface Mapper接口类
      * @param method 方法对象
+     * @throws BindingException 当找不到对应的SQL语句或SQL类型未知时
      */
     public SqlCommand(Configuration configuration, Class<?> mapperInterface, Method method) {
+      // 获取方法名和声明类
       final String methodName = method.getName();
       final Class<?> declaringClass = method.getDeclaringClass();
+
+      // 解析MappedStatement，支持继承关系
       MappedStatement ms = resolveMappedStatement(mapperInterface, methodName, declaringClass, configuration);
 
       // 处理@Flush注解的特殊情况
       if (ms == null) {
         if (method.getAnnotation(Flush.class) != null) {
+          // @Flush注解方法不需要MappedStatement
           name = null;
           type = SqlCommandType.FLUSH;
         } else {
+          // 找不到对应的SQL语句定义
           throw new BindingException("Invalid bound statement (not found): "
               + mapperInterface.getName() + "." + methodName);
         }
       } else {
+        // 设置SQL命令的名称和类型
         name = ms.getId();
         type = ms.getSqlCommandType();
         if (type == SqlCommandType.UNKNOWN) {
+          // SQL类型未知
           throw new BindingException("Unknown execution method for: " + name);
         }
       }
@@ -359,12 +462,41 @@ public class MapperMethod {
       return type;
     }
 
-    private MappedStatement resolveMappedStatement(Class<?> mapperInterface, String methodName, Class<?> declaringClass,
-        Configuration configuration) {
+    /**
+     * 解析MappedStatement对象
+     *
+     * <p>查找规则：</p>
+     * <ul>
+     *   <li>优先查找当前接口的方法映射</li>
+     *   <li>如果方法在父接口中声明，则向上查找父接口的方法映射</li>
+     *   <li>如果找不到对应的MappedStatement则返回null</li>
+     * </ul>
+     *
+     * <p>注意事项：</p>
+     * <ul>
+     *   <li>statementId必须全局唯一</li>
+     *   <li>继承场景下需要确保方法在某个父接口中有对应的SQL映射</li>
+     *   <li>通常在初始化时就能检测到映射缺失的问题</li>
+     * </ul>
+     *
+     * @param mapperInterface Mapper接口类
+     * @param methodName 方法名
+     * @param declaringClass 声明该方法的类
+     * @param configuration MyBatis配置对象
+     * @return 解析得到的MappedStatement对象，如果找不到则返回null
+     */
+    private MappedStatement resolveMappedStatement(Class<?> mapperInterface, String methodName,
+        Class<?> declaringClass, Configuration configuration) {
+      // 构建完整的statementId: mapperInterface.methodName
       String statementId = mapperInterface.getName() + "." + methodName;
+
+      // 尝试从Configuration中获取MappedStatement
       if (configuration.hasStatement(statementId)) {
         return configuration.getMappedStatement(statementId);
       }
+
+      // 如果当前接口找不到，且方法是在父接口中声明的
+      // 则尝试从父接口中查找对应的MappedStatement
       if (mapperInterface.equals(declaringClass)) {
         return null;
       }
