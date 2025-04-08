@@ -18,18 +18,18 @@ package org.apache.ibatis.cache;
 import java.util.concurrent.locks.ReadWriteLock;
 
 /**
- * SPI for cache providers.
+ * 缓存提供者的服务提供接口(SPI)。
  * <p>
- * One instance of cache will be created for each namespace.
+ * 每个命名空间将创建一个缓存实例。
  * <p>
- * The cache implementation must have a constructor that receives the cache id as an String parameter.
+ * 缓存实现必须具有一个接收缓存id作为String参数的构造函数。
  * <p>
- * MyBatis will pass the namespace as id to the constructor.
+ * MyBatis将命名空间作为id传递给构造函数。
  *
  * <pre>
  * public MyCache(final String id) {
  *   if (id == null) {
- *     throw new IllegalArgumentException("Cache instances require an ID");
+ *     throw new IllegalArgumentException("缓存实例需要一个ID");
  *   }
  *   this.id = id;
  *   initialize();
@@ -42,57 +42,68 @@ import java.util.concurrent.locks.ReadWriteLock;
 public interface Cache {
 
   /**
-   * @return The identifier of this cache
+   * 获取缓存的标识符
+   *
+   * @return 此缓存的标识符，通常是mapper的命名空间
    */
   String getId();
 
   /**
+   * 将对象存入缓存
+   *
    * @param key
-   *          Can be any object but usually it is a {@link CacheKey}
+   *          可以是任何对象，但通常是{@link CacheKey}
    * @param value
-   *          The result of a select.
+   *          查询的结果对象
    */
   void putObject(Object key, Object value);
 
   /**
-   * @param key
-   *          The key
+   * 从缓存获取对象
    *
-   * @return The object stored in the cache.
+   * @param key
+   *          缓存键
+   *
+   * @return 存储在缓存中的对象，如果不存在则返回null
    */
   Object getObject(Object key);
 
   /**
-   * As of 3.3.0 this method is only called during a rollback for any previous value that was missing in the cache. This
-   * lets any blocking cache to release the lock that may have previously put on the key. A blocking cache puts a lock
-   * when a value is null and releases it when the value is back again. This way other threads will wait for the value
-   * to be available instead of hitting the database.
+   * 从缓存移除对象
+   * <p>
+   * 从3.3.0版本开始，此方法仅在回滚期间为先前在缓存中缺失的值调用。
+   * 这允许任何阻塞缓存释放可能之前放在键上的锁。阻塞缓存在值为null时放置锁，
+   * 当值再次可用时释放锁。这样，其他线程将等待值可用，而不是直接查询数据库。
    *
    * @param key
-   *          The key
+   *          缓存键
    *
-   * @return Not used
+   * @return 不使用返回值
    */
   Object removeObject(Object key);
 
   /**
-   * Clears this cache instance.
+   * 清空此缓存实例中的所有对象
    */
   void clear();
 
   /**
-   * Optional. This method is not called by the core.
+   * 获取缓存中元素数量
+   * <p>
+   * 可选实现。此方法不会被核心代码调用。
    *
-   * @return The number of elements stored in the cache (not its capacity).
+   * @return 存储在缓存中的元素数量（不是其容量）
    */
   int getSize();
 
   /**
-   * Optional. As of 3.2.6 this method is no longer called by the core.
+   * 获取读写锁
    * <p>
-   * Any locking needed by the cache must be provided internally by the cache provider.
+   * 可选实现。从3.2.6版本开始，此方法不再被核心代码调用。
+   * <p>
+   * 缓存所需的任何锁定必须由缓存提供者内部提供。
    *
-   * @return A ReadWriteLock
+   * @return 读写锁对象，默认返回null
    */
   default ReadWriteLock getReadWriteLock() {
     return null;
