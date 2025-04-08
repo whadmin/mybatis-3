@@ -45,23 +45,75 @@ import org.apache.ibatis.transaction.Transaction;
 import org.apache.ibatis.type.TypeHandlerRegistry;
 
 /**
+ * MyBatis执行器的基础实现类，提供了模板方法模式的骨架实现
+ * 主要功能：
+ * 1. 处理一级缓存（会话级别的缓存）
+ * 2. 处理事务管理
+ * 3. 处理连接获取
+ * 4. 处理语句执行
+ * 5. 处理延迟加载
+ *
+ * 主要子类：
+ * - SimpleExecutor: 简单执行器，每次执行创建新的Statement
+ * - ReuseExecutor: 可重用执行器，重用Statement对象
+ * - BatchExecutor: 批处理执行器，用于批量执行SQL
+ *
  * @author Clinton Begin
  */
 public abstract class BaseExecutor implements Executor {
 
+  /**
+   * 日志对象
+   */
   private static final Log log = LogFactory.getLog(BaseExecutor.class);
 
+  /**
+   * 事务对象，用于管理数据库连接和事务操作
+   */
   protected Transaction transaction;
+
+  /**
+   * 包装的执行器对象，用于实现装饰器模式
+   */
   protected Executor wrapper;
 
+  /**
+   * 延迟加载队列，存储需要延迟加载的对象
+   */
   protected ConcurrentLinkedQueue<DeferredLoad> deferredLoads;
+
+  /**
+   * 一级缓存，用于存储查询结果
+   * 作用域: Session级别或Statement级别（可配置）
+   */
   protected PerpetualCache localCache;
+
+  /**
+   * 存储过程输出参数的本地缓存
+   */
   protected PerpetualCache localOutputParameterCache;
+
+  /**
+   * MyBatis配置对象
+   */
   protected Configuration configuration;
 
+  /**
+   * 查询堆栈深度，用于处理嵌套查询
+   */
   protected int queryStack;
+
+  /**
+   * 执行器是否已关闭的标志
+   */
   private boolean closed;
 
+  /**
+   * 构造函数
+   *
+   * @param configuration MyBatis配置对象
+   * @param transaction 事务对象
+   */
   protected BaseExecutor(Configuration configuration, Transaction transaction) {
     this.transaction = transaction;
     this.deferredLoads = new ConcurrentLinkedQueue<>();
@@ -107,6 +159,13 @@ public abstract class BaseExecutor implements Executor {
     return closed;
   }
 
+  /**
+   * 执行更新操作（包括insert、update、delete）
+   * 执行流程：
+   * 1. 检查执行器状态
+   * 2. 清空本地缓存
+   * 3. 调用doUpdate执行实际的更新操作
+   */
   @Override
   public int update(MappedStatement ms, Object parameter) throws SQLException {
     ErrorContext.instance().resource(ms.getResource()).activity("executing an update").object(ms.getId());
@@ -129,6 +188,14 @@ public abstract class BaseExecutor implements Executor {
     return doFlushStatements(isRollBack);
   }
 
+  /**
+   * 执行查询操作，支持一级缓存
+   * 执行流程：
+   * 1. 创建CacheKey
+   * 2. 查询一级缓存
+   * 3. 缓存未命中则查询数据库
+   * 4. 将结果存入一级缓存
+   */
   @Override
   public <E> List<E> query(MappedStatement ms, Object parameter, RowBounds rowBounds, ResultHandler resultHandler)
       throws SQLException {
@@ -194,6 +261,16 @@ public abstract class BaseExecutor implements Executor {
     }
   }
 
+  /**
+   * 创建缓存键
+   * 缓存键由以下部分组成：
+   * 1. 语句ID
+   * 2. 分页偏移量
+   * 3. 分页大小
+   * 4. SQL语句
+   * 5. 参数值
+   * 6. 环境ID
+   */
   @Override
   public CacheKey createCacheKey(MappedStatement ms, Object parameterObject, RowBounds rowBounds, BoundSql boundSql) {
     if (closed) {
@@ -265,6 +342,12 @@ public abstract class BaseExecutor implements Executor {
     }
   }
 
+  /**
+   * 清空本地缓存
+   * 同时会清空：
+   * 1. 查询结果缓存
+   * 2. 存储过程输出参数缓存
+   */
   @Override
   public void clearLocalCache() {
     if (!closed) {
@@ -357,6 +440,10 @@ public abstract class BaseExecutor implements Executor {
     this.wrapper = wrapper;
   }
 
+  /**
+   * 延迟加载内部类
+   * 用于处理关联查询的延迟加载功能
+   */
   private static class DeferredLoad {
 
     private final MetaObject resultObject;
