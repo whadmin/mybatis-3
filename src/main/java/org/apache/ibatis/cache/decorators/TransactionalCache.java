@@ -54,7 +54,7 @@ public class TransactionalCache implements Cache {
   private boolean clearOnCommit;
 
   /**
-   * 在事务提交时要添加到缓存的entries
+       * 在事务提交时要添加到缓存的entries
    * 临时存储区，避免在事务完成前修改底层缓存
    */
   private final Map<Object, Object> entriesToAddOnCommit;
