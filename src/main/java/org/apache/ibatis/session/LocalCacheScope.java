@@ -16,8 +16,27 @@
 package org.apache.ibatis.session;
 
 /**
+ * LocalCacheScope 枚举定义了 MyBatis 本地缓存的作用范围。
+ *
+ * - SESSION: 缓存作用范围为整个会话（SqlSession）。在同一个会话中，执行多次相同的查询时，
+ *            如果参数相同，MyBatis 会直接从缓存中获取结果，而不会再次访问数据库。
+ *            适用于需要减少数据库访问次数、提高性能的场景。
+ *
+ * - STATEMENT: 缓存作用范围为单个语句。在每次执行查询时，MyBatis 都会清空缓存并重新加载数据。
+ *              适用于需要确保数据实时性、避免脏读的场景。
+ *
  * @author Eduardo Macarron
  */
 public enum LocalCacheScope {
-  SESSION, STATEMENT
+  /**
+   * 缓存作用范围为整个会话（SqlSession）。
+   * 在同一个会话中，重复执行相同的查询会使用缓存。
+   */
+  SESSION,
+
+  /**
+   * 缓存作用范围为单个语句。
+   * 每次执行查询都会清空缓存，确保数据的实时性。
+   */
+  STATEMENT
 }
