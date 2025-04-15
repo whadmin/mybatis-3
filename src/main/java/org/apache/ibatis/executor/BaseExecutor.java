@@ -78,18 +78,157 @@ public abstract class BaseExecutor implements Executor {
   protected Executor wrapper;
 
   /**
-   * 延迟加载队列，存储需要延迟加载的对象
+   * 延迟加载队列，存储需要延迟加载的对象，
+   * 使用示例：
+   * <!-- 用户映射配置 -->
+   * <resultMap id="userMap" type="User">
+   *   <id property="id" column="user_id"/>
+   *   <result property="name" column="user_name"/>
+   *   <!-- 配置延迟加载的订单集合 -->
+   *   <collection property="orders"
+   *               select="getOrdersByUserId"
+   *               column="user_id"
+   *               fetchType="lazy"/>
+   * </resultMap>
+   *
+   * <!-- 查询用户 -->
+   * <select id="getUser" resultMap="userMap">
+   *   SELECT user_id, user_name FROM users WHERE user_id = #{id}
+   * </select>
+   *
+   * <!-- 查询订单，将被延迟调用 -->
+   * <select id="getOrdersByUserId" resultType="Order">
+   *   SELECT order_id, price FROM orders WHERE user_id = #{userId}
+   * </select>
+   *
+   * // Java代码：
+   * // 1. 查询用户
+   * User user = sqlSession.selectOne("getUser", 1);
+   * System.out.println("用户名: " + user.getName());
+   *
+   * // 2. 此时orders尚未加载，创建了DeferredLoad对象并加入队列
+   *
+   * // 3. 首次访问orders属性时触发延迟加载
+   * System.out.println("订单数量: " + user.getOrders().size());
+   *
+   * 延迟加载流程：
+   * 1. 执行主查询(getUser)获取用户基本信息
+   * 2. 遇到延迟加载的orders属性，创建DeferredLoad对象
+   * 3. 将DeferredLoad对象加入deferredLoads队列
+   * 4. 当首次访问user.getOrders()时，触发加载
+   * 5. 执行关联查询(getOrdersByUserId)获取订单信息
+   * 6. 通过resultObject.setValue()将订单列表设置到用户对象
    */
   protected ConcurrentLinkedQueue<DeferredLoad> deferredLoads;
 
   /**
-   * 一级缓存，用于存储查询结果
+   * 一级缓存，用于存储普通查询结果
    * 作用域: Session级别或Statement级别（可配置）
+   *
+   * 工作原理：
+   * 1. 执行查询时，先检查缓存中是否存在相同查询的结果
+   * 2. 如果缓存命中，直接返回缓存的结果集，不再访问数据库
+   * 3. 如果缓存未命中，执行数据库查询，并将结果存入缓存
+   * 4. 在执行更新、提交或回滚时自动清空缓存
+   *
+   * 使用示例：
+   * // XML配置文件中设置缓存范围
+   * <settings>
+   *   <!-- SESSION: 一个会话内共享缓存，默认值 -->
+   *   <!-- STATEMENT: 仅在语句执行范围内有效 -->
+   *   <setting name="localCacheScope" value="SESSION"/>
+   * </settings>
+   *
+   * // 使用MyBatis API
+   * // 1. 首次查询，访问数据库并缓存结果
+   * List<User> users1 = sqlSession.selectList("getUsers", parameter);
+   *
+   * // 2. 相同参数再次查询，直接从缓存获取，不访问数据库
+   * List<User> users2 = sqlSession.selectList("getUsers", parameter);
+   *
+   * // 3. 执行更新操作将清空缓存
+   * sqlSession.update("updateUser", someParameter);
+   *
+   * // 4. 更新后再查询，缓存已清空，将再次访问数据库
+   * List<User> users3 = sqlSession.selectList("getUsers", parameter);
+   *
+   * // 5. 手动清空缓存
+   * sqlSession.clearCache();
+   *
+   * 缓存键组成：
+   * 1. SQL语句ID (Mapper方法的完全限定名)
+   * 2. 查询参数值
+   * 3. 分页参数(RowBounds)
+   * 4. SQL语句文本(包括动态SQL生成的实际SQL)
+   * 5. 环境ID
+   *
+   * 注意事项：
+   * 1. 一级缓存默认启用，且作用域为SESSION
+   * 2. 可通过localCacheScope配置项修改作用域
+   * 3. 使用resultHandler时不会启用缓存
+   * 4. 存储过程查询也会缓存结果(可能是空列表)
+   * 5. 在缓存生命周期内，返回的是同一对象引用
    */
   protected PerpetualCache localCache;
 
   /**
-   * 存储过程输出参数的本地缓存
+   * 一级缓存，用于存储存储过程的输出参数
+   * 作用：缓存存储过程调用后的输出参数值，以便在相同参数再次调用时直接获取，避免重复执行
+   *
+   * 工作原理：
+   * 1. 执行存储过程时，将包含输出参数的整个参数对象缓存在localOutputParameterCache中
+   * 2. 同时，将存储过程执行的结果集(可能为空列表)存储在localCache中
+   * 3. 当使用相同的参数再次调用相同的存储过程时：
+   *    - 先检查localCache是否命中，若命中则不再执行查询
+   *    - 然后从localOutputParameterCache中获取之前的输出参数值并填充到新的参数对象中
+   * 4. 避免了重复执行数据库调用，提高性能
+   *
+   * 完整使用示例：
+   *
+   * CREATE PROCEDURE get_user_info(
+   *     IN user_id INT,               -- 输入参数
+   *     OUT total_orders INT,         -- 输出参数
+   *     OUT total_spent DECIMAL(10,2) -- 输出参数
+   * )
+   * BEGIN
+   *     -- 获取订单总数
+   *     SELECT COUNT(*) INTO total_orders
+   *     FROM orders WHERE user_id = user_id;
+   *
+   *     -- 获取消费总额
+   *     SELECT SUM(amount) INTO total_spent
+   *     FROM orders WHERE user_id = user_id;
+   * END
+   *
+   * // 1. 准备参数Map，包含输入参数和输出参数占位符
+   * Map<String, Object> paramMap = new HashMap<>();
+   * paramMap.put("userId", 123);
+   * paramMap.put("totalOrders", null); // OUT参数初始为null
+   * paramMap.put("totalSpent", null);  // OUT参数初始为null
+   *
+   * // 2. 执行存储过程 - 首次调用会访问数据库
+   * sqlSession.selectOne("getUserInfo", paramMap);
+   *
+   * // 3. 此时paramMap中已包含存储过程的输出值
+   * Integer totalOrders = (Integer) paramMap.get("totalOrders");
+   * BigDecimal totalSpent = (BigDecimal) paramMap.get("totalSpent");
+   * System.out.println("用户订单数: " + totalOrders);
+   * System.out.println("消费总额: " + totalSpent);
+   *
+   * // 4. 如果使用相同参数再次调用相同存储过程
+   * // 会直接从localOutputParameterCache获取输出参数值
+   * // 不会再次执行实际的存储过程
+   * Map<String, Object> paramMap2 = new HashMap<>();
+   * paramMap2.put("userId", 123);
+   * paramMap2.put("totalOrders", null);
+   * paramMap2.put("totalSpent", null);
+   *
+   * // 5. 第二次调用 - 直接使用缓存，不访问数据库
+   * sqlSession.selectOne("getUserInfo", paramMap2);
+   *
+   * // 6. paramMap2中的值会从缓存中获取，而不是重新执行存储过程
+   * Integer cachedTotalOrders = (Integer) paramMap2.get("totalOrders");
+   * BigDecimal cachedTotalSpent = (BigDecimal) paramMap2.get("totalSpent");
    */
   protected PerpetualCache localOutputParameterCache;
 
@@ -624,18 +763,94 @@ public abstract class BaseExecutor implements Executor {
   /**
    * 延迟加载内部类
    * 用于处理关联查询的延迟加载功能
+   * 核心作用：存储需要延迟加载的对象信息，并在合适时机执行实际加载
+   *
+   * 使用示例：
+   * <!-- 用户映射配置 -->
+   * <resultMap id="userMap" type="User">
+   *   <id property="id" column="user_id"/>
+   *   <result property="name" column="user_name"/>
+   *   <!-- 配置延迟加载的订单集合 -->
+   *   <collection property="orders"
+   *               select="getOrdersByUserId"
+   *               column="user_id"
+   *               fetchType="lazy"/>
+   * </resultMap>
+   *
+   * <!-- 查询用户 -->
+   * <select id="getUser" resultMap="userMap">
+   *   SELECT user_id, user_name FROM users WHERE user_id = #{id}
+   * </select>
+   *
+   * <!-- 查询订单，将被延迟调用 -->
+   * <select id="getOrdersByUserId" resultType="Order">
+   *   SELECT order_id, price FROM orders WHERE user_id = #{userId}
+   * </select>
+   *
+   * // Java代码：
+   * // 1. 查询用户
+   * User user = sqlSession.selectOne("getUser", 1);
+   * System.out.println("用户名: " + user.getName());
+   *
+   * // 2. 此时orders尚未加载，创建了DeferredLoad对象并加入队列
+   *
+   * // 3. 首次访问orders属性时触发延迟加载
+   * System.out.println("订单数量: " + user.getOrders().size());
+   *
+   * 延迟加载流程：
+   * 1. 执行主查询(getUser)获取用户基本信息
+   * 2. 遇到延迟加载的orders属性，创建DeferredLoad对象
+   * 3. 将DeferredLoad对象加入deferredLoads队列
+   * 4. 当首次访问user.getOrders()时，触发加载
+   * 5. 执行关联查询(getOrdersByUserId)获取订单信息
+   * 6. 通过resultObject.setValue()将订单列表设置到用户对象
    */
   private static class DeferredLoad {
 
+    /**
+     * 结果对象的元对象，用于设置延迟加载的属性值
+     */
     private final MetaObject resultObject;
+
+    /**
+     * 需要延迟加载的属性名
+     */
     private final String property;
+
+    /**
+     * 目标类型，用于类型转换
+     */
     private final Class<?> targetType;
+
+    /**
+     * 缓存键，用于从localCache获取实际数据
+     */
     private final CacheKey key;
+
+    /**
+     * 本地缓存，存储查询结果
+     */
     private final PerpetualCache localCache;
+
+    /**
+     * 对象工厂，用于创建对象实例
+     */
     private final ObjectFactory objectFactory;
+
+    /**
+     * 结果提取器，用于从结果列表中提取目标对象
+     */
     private final ResultExtractor resultExtractor;
 
-    // issue #781
+    /**
+     * 构造函数
+     * @param resultObject 结果对象元对象
+     * @param property 要加载的属性名
+     * @param key 缓存键
+     * @param localCache 本地缓存
+     * @param configuration MyBatis配置
+     * @param targetType 目标类型
+     */
     public DeferredLoad(MetaObject resultObject, String property, CacheKey key, PerpetualCache localCache,
         Configuration configuration, Class<?> targetType) {
       this.resultObject = resultObject;
@@ -647,18 +862,31 @@ public abstract class BaseExecutor implements Executor {
       this.targetType = targetType;
     }
 
+    /**
+     * 检查是否可以立即加载
+     * 条件：缓存中存在对应的数据且不是占位符
+     * @return 是否可以加载
+     */
     public boolean canLoad() {
       return localCache.getObject(key) != null && localCache.getObject(key) != EXECUTION_PLACEHOLDER;
     }
 
+    /**
+     * 执行加载操作
+     * 流程：
+     * 1. 从缓存获取数据列表
+     * 2. 从列表中提取目标类型的对象
+     * 3. 将对象设置到结果对象的指定属性
+     */
     public void load() {
       @SuppressWarnings("unchecked")
-      // we suppose we get back a List
+      // 假设从缓存中获取的是List类型
       List<Object> list = (List<Object>) localCache.getObject(key);
+      // 从列表中提取单个对象或集合
       Object value = resultExtractor.extractObjectFromList(list, targetType);
+      // 设置到结果对象的属性中
       resultObject.setValue(property, value);
     }
-
   }
 
 }
