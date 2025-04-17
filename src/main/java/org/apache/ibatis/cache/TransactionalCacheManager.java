@@ -40,9 +40,7 @@ public class TransactionalCacheManager {
   private final Map<Cache, TransactionalCache> transactionalCaches = new HashMap<>();
 
   /**
-   * 清空指定缓存
-   * <p>
-   * 这个方法只是标记缓存为清空状态，实际清空操作在事务提交时执行
+   * 清空指定缓存,这个方法只是标记缓存为清空状态，实际清空操作在事务提交时执行
    *
    * @param cache 要清空的缓存
    */
