@@ -210,7 +210,7 @@ public abstract class BaseStatementHandler implements StatementHandler {
             queryTimeout = configuration.getDefaultStatementTimeout();
         }
         if (queryTimeout != null) {
-            stmt.setQueryTimeout(queryTimeout);
+              stmt.setQueryTimeout(queryTimeout);
         }
         StatementUtil.applyTransactionTimeout(stmt, queryTimeout, transactionTimeout);
     }
@@ -234,7 +234,7 @@ public abstract class BaseStatementHandler implements StatementHandler {
         }
         Integer defaultFetchSize = configuration.getDefaultFetchSize();
         if (defaultFetchSize != null) {
-            stmt.setFetchSize(defaultFetchSize);
+              stmt.setFetchSize(defaultFetchSize);
         }
     }
 
