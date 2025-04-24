@@ -33,9 +33,22 @@ import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 
 /**
- * PreparedStatement处理器，继承自BaseStatementHandler
- * 负责处理预编译语句(PreparedStatement)的操作，是MyBatis最常用的Statement处理器
- * 相比Statement，PreparedStatement可以防止SQL注入，并且具有更好的性能
+ * PreparedStatementHandler 是 StatementHandler 接口的预编译语句实现
+ * 它使用 java.sql.PreparedStatement 执行 SQL 语句，主要特点：
+ * 1. 支持参数占位符(?)，防止SQL注入
+ * 2. SQL语句会被数据库预编译，提高多次执行相同SQL的性能
+ * 3. 是MyBatis默认的StatementHandler实现
+ * 4. 支持各种类型的参数传递和类型转换
+ *
+ * 使用示例：
+ * <select id="findUserById" resultType="User">
+ *   SELECT * FROM user WHERE id = #{id}
+ * </select>
+ *
+ * <!-- 默认情况下不需要显式指定statementType="PREPARED" -->
+ * <insert id="insertUser" parameterType="User" useGeneratedKeys="true" keyProperty="id">
+ *   INSERT INTO user(name, age, email) VALUES(#{name}, #{age}, #{email})
+ * </insert>
  *
  * @author Clinton Begin
  */
@@ -60,6 +73,11 @@ public class PreparedStatementHandler extends BaseStatementHandler {
    * 执行更新操作（包括insert、update、delete）
    * 支持自动生成主键的功能
    *
+   * 执行过程：
+   * 1. 调用PreparedStatement.execute()执行SQL
+   * 2. 获取受影响的行数
+   * 3. 处理主键生成（如自增主键回填到对象）
+   *
    * @param statement Statement对象
    * @return 受影响的行数
    * @throws SQLException SQL异常
@@ -77,6 +95,14 @@ public class PreparedStatementHandler extends BaseStatementHandler {
 
   /**
    * 将SQL语句添加到批处理中
+   * 在批量处理场景下使用，可以提高大量数据操作的性能
+   *
+   * 批处理使用示例：
+   * sqlSession.startBatch();
+   * for (User user : userList) {
+   *   userMapper.insert(user);
+   * }
+   * sqlSession.flushBatch();
    *
    * @param statement Statement对象
    * @throws SQLException SQL异常
@@ -89,6 +115,9 @@ public class PreparedStatementHandler extends BaseStatementHandler {
 
   /**
    * 执行查询操作，返回结果列表
+   * 基本流程：
+   * 1. 执行预编译的SQL
+   * 2. 通过resultSetHandler处理结果集并转换为Java对象
    *
    * @param statement Statement对象
    * @param resultHandler 结果集处理器
@@ -104,7 +133,18 @@ public class PreparedStatementHandler extends BaseStatementHandler {
 
   /**
    * 执行查询操作，返回Cursor对象
-   * 用于流式查询，适合处理大量数据
+   * 用于流式查询，适合处理大量数据，避免一次性加载全部数据到内存
+   *
+   * 使用示例：
+   * <select id="selectLargeData" resultType="User" fetchSize="100">
+   *   SELECT * FROM user
+   * </select>
+   *
+   * try (Cursor<User> cursor = sqlSession.selectCursor("selectLargeData")) {
+   *   for (User user : cursor) {
+   *     // 处理每条记录，一次只加载有限数量的数据到内存
+   *   }
+   * }
    *
    * @param statement Statement对象
    * @return Cursor对象
@@ -201,6 +241,11 @@ public class PreparedStatementHandler extends BaseStatementHandler {
   /**
    * 设置PreparedStatement的参数
    * 使用ParameterHandler处理参数设置
+   *
+   * 处理过程：
+   * 1. 将Java对象的属性转换为JDBC支持的类型
+   * 2. 按照SQL中参数占位符的顺序设置参数值
+   * 3. 支持各种参数类型，包括基本类型、对象、集合等
    *
    * @param statement Statement对象
    * @throws SQLException SQL异常

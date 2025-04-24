@@ -33,9 +33,17 @@ import org.apache.ibatis.session.ResultHandler;
 import org.apache.ibatis.session.RowBounds;
 
 /**
- * SimpleStatementHandler 是最基本的 StatementHandler 实现类
- * 负责处理不需要预编译的 Statement 对象
- * 直接将 SQL 语句发送到数据库执行，不支持参数化
+ * SimpleStatementHandler 是 StatementHandler 接口的基础实现
+ * 它使用 java.sql.Statement 执行 SQL 语句，主要特点：
+ * 1. 不支持参数占位符，SQL 中直接包含具体参数值
+ * 2. SQL 语句在每次执行时解析，不进行预编译
+ * 3. 适合执行简单静态 SQL 或一次性执行的语句
+ * 4. 性能相对 PreparedStatement 较低，存在 SQL 注入风险
+ *
+ * 使用示例：
+ * <select id="selectById" statementType="SIMPLE" resultType="User">
+ *   SELECT * FROM user WHERE id = ${id}
+ * </select>
  *
  * @author Clinton Begin
  */
@@ -44,12 +52,12 @@ public class SimpleStatementHandler extends BaseStatementHandler {
   /**
    * 构造函数
    *
-   * @param executor Executor对象，用于执行SQL
-   * @param mappedStatement MappedStatement对象，包含SQL相关配置信息
-   * @param parameter SQL参数对象
-   * @param rowBounds 分页参数
+   * @param executor Executor对象，负责整体SQL执行流程
+   * @param mappedStatement MappedStatement对象，封装了XML中配置的SQL信息
+   * @param parameter 用户传入的参数对象，用于SQL拼接
+   * @param rowBounds 用于分页的参数对象
    * @param resultHandler 结果集处理器
-   * @param boundSql 解析后的SQL语句对象
+   * @param boundSql 已完成参数绑定的SQL对象，包含最终要执行的SQL语句
    */
   public SimpleStatementHandler(Executor executor, MappedStatement mappedStatement, Object parameter,
       RowBounds rowBounds, ResultHandler resultHandler, BoundSql boundSql) {
@@ -58,11 +66,14 @@ public class SimpleStatementHandler extends BaseStatementHandler {
 
   /**
    * 执行更新操作（包括 insert、update、delete）
-   * 支持自动生成主键
+   * 使用 java.sql.Statement.execute() 方法执行SQL
+   * 支持多种主键生成策略：
+   * 1. Jdbc3KeyGenerator：利用JDBC的getGeneratedKeys获取自增主键
+   * 2. SelectKeyGenerator：通过额外SQL查询获取主键
    *
    * @param statement Statement对象
    * @return 受影响的行数
-   * @throws SQLException SQL异常
+   * @throws SQLException SQL执行异常
    */
   @Override
   public int update(Statement statement) throws SQLException {
@@ -90,6 +101,7 @@ public class SimpleStatementHandler extends BaseStatementHandler {
 
   /**
    * 将SQL语句添加到批处理中
+   * 用于批量执行多条SQL语句
    *
    * @param statement Statement对象
    * @throws SQLException SQL异常
@@ -101,7 +113,8 @@ public class SimpleStatementHandler extends BaseStatementHandler {
   }
 
   /**
-   * 执行查询操作，返回结果列表
+   * 执行查询操作并返回结果列表
+   * 直接使用SQL字符串执行查询，SQL中已包含具体值
    *
    * @param statement Statement对象
    * @param resultHandler 结果集处理器
@@ -116,10 +129,11 @@ public class SimpleStatementHandler extends BaseStatementHandler {
   }
 
   /**
-   * 执行查询操作，返回游标对象
+   * 执行查询并返回游标对象
+   * 游标允许流式处理结果集，适用于处理大量数据
    *
    * @param statement Statement对象
-   * @return Cursor游标对象
+   * @return Cursor游标对象，支持流式访问结果集
    * @throws SQLException SQL异常
    */
   @Override
@@ -131,7 +145,8 @@ public class SimpleStatementHandler extends BaseStatementHandler {
 
   /**
    * 创建Statement实例
-   * 根据ResultSetType类型创建对应的Statement对象
+   * 根据配置的ResultSetType属性创建适当的Statement对象
+   * ResultSetType控制结果集的特性，如是否可滚动、是否敏感等
    *
    * @param connection 数据库连接对象
    * @return Statement对象
@@ -146,13 +161,15 @@ public class SimpleStatementHandler extends BaseStatementHandler {
   }
 
   /**
-   * 设置参数（SimpleStatementHandler不需要设置参数，因为SQL中已经包含了参数值）
+   * 设置SQL参数
+   * 对于SimpleStatementHandler，此方法为空实现
+   * 因为SimpleStatementHandler使用的SQL已经包含了具体参数值，
+   * 不像PreparedStatementHandler需要设置参数占位符的值
    *
    * @param statement Statement对象
    */
   @Override
   public void parameterize(Statement statement) {
-    // N/A
+    // 不需要实现，因为SimpleStatementHandler使用的SQL已包含具体参数值
   }
-
 }
